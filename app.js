@@ -51,7 +51,7 @@
   // ---------- 全局状态 ----------
   const STATE = {
     lang: 'zh',
-    page: 'overview',              // overview | rack | kv | traffic | compare
+    page: 'run',                   // run | overview | rack | kv | traffic | lc | compare
     scenario: 'S1',
     selectedRack: 'R1',
     selectedKV: null,

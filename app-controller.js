@@ -21,6 +21,11 @@
     $$('[data-i18n]').forEach(el => el.textContent = t(el.getAttribute('data-i18n')));
     // 语言按钮
     $$('.lang-btn').forEach(b => b.classList.toggle('is-active', b.getAttribute('data-lang') === STATE.lang));
+    // 「运行流程」页：自带舞台与左右面板，不经过 SVG / WebGL 渲染器
+    if (STATE.page === 'run' && window.__RENDER_FLOW__) {
+      window.__RENDER_FLOW__.renderAll();
+      return;
+    }
     // 场景状态栏
     updateStageHeader();
     updateScenarioLabel();
@@ -95,6 +100,7 @@
     log('切换页面 → ' + page);
     APP.render();
     if (page === 'lc' && window.__RENDER_LC__) window.__RENDER_LC__.onEnter();
+    if (page === 'run' && window.__RENDER_FLOW__) window.__RENDER_FLOW__.onEnter();
   };
 
   // ---------- 场景加载 ----------
@@ -735,7 +741,7 @@
     // 支持 URL 参数指定初始页面/场景/KV，便于分享与测试
     const params = new URLSearchParams(location.search);
     const p = params.get('page');
-    if (p && ['overview','rack','kv','traffic','lc','compare'].includes(p)) STATE.page = p;
+    if (p && ['run','overview','rack','kv','traffic','lc','compare'].includes(p)) STATE.page = p;
     if (p === 'lc' && window.__RENDER_LC__) { const lcs = params.get('lcsc'); if (lcs) STATE.lc = { scene: lcs, step: 0, playing: false }; }
     const hv = params.get('hwview');
     if (hv && ['physical','network','threeD','pipeline'].includes(hv)) STATE.hwView = hv;
