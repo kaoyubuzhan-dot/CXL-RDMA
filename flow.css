@@ -49,6 +49,10 @@
 #app[data-page="run"] .analysis{display:none!important}
 #app[data-page="run"] .stage{padding:0}
 
+/* 离开运行流程页时隐藏其舞台容器，避免覆盖其它页面的 SVG / 3D 视图 */
+#app:not([data-page="run"]) #flow-host,
+#app:not([data-page="run"]) #flow-deck{display:none}
+
 #flow-host{position:absolute;inset:0 0 122px 0;z-index:4}
 #flow-svg{display:block;width:100%;height:100%}
 #flow-deck{position:absolute;left:0;right:0;bottom:0;height:122px;z-index:6;

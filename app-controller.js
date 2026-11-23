@@ -101,6 +101,7 @@
     APP.render();
     if (page === 'lc' && window.__RENDER_LC__) window.__RENDER_LC__.onEnter();
     if (page === 'run' && window.__RENDER_FLOW__) window.__RENDER_FLOW__.onEnter();
+    if (page !== 'run' && window.__RENDER_FLOW__) window.__RENDER_FLOW__.pause();
   };
 
   // ---------- 场景加载 ----------
