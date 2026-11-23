@@ -6,13 +6,21 @@
 
 ## 在线体验
 
-部署到 GitHub Pages 后，访问：
+### 👉 https://kaoyubuzhan-dot.github.io/CXL-RDMA/
 
-```
-https://<你的用户名>.github.io/<仓库名>/
-```
+由 GitHub Pages 从 `main` 分支根目录直接发布，零构建。首次打开若返回 404，说明 Pages 仍在构建中（约 1～3 分钟），稍后刷新即可。
 
-## 五个功能页
+常用直达链接（可直接发给别人）：
+
+| 演示场景 | 链接 |
+| --- | --- |
+| 首页 · 集群总览 | https://kaoyubuzhan-dot.github.io/CXL-RDMA/ |
+| 机架解剖 · 三维 | https://kaoyubuzhan-dot.github.io/CXL-RDMA/?page=rack&hwview=threeD |
+| KV 生命周期 · 跨机架共享热点 | https://kaoyubuzhan-dot.github.io/CXL-RDMA/?page=lc&lcsc=S3 |
+| 网络与访问 | https://kaoyubuzhan-dot.github.io/CXL-RDMA/?page=traffic |
+| 方案对比 | https://kaoyubuzhan-dot.github.io/CXL-RDMA/?page=compare |
+
+## 六个功能页
 
 | 页面 | 内容 |
 | --- | --- |
@@ -45,12 +53,25 @@ npx serve .
 python -m http.server 8080
 ```
 
-## 发布到 GitHub Pages
+## 发布到 GitHub Pages（已配置）
 
-1. 新建仓库并推送本项目（本仓库已用 `.gitignore` 排除全部 `_` 前缀调试文件）。
-2. 仓库根目录已放置 `.nojekyll`，避免 Pages 的 Jekyll 处理下划线文件。
-3. 进入 **Settings → Pages**，Source 选 `Deploy from a branch`，Branch 选 `main` / `/ (root)`，保存。
-4. 等待部署完成后访问上方在线地址。
+站点以 `main` 分支根目录发布（Deploy from a branch → `main` / `/ (root)`），仓库根目录的 `.nojekyll` 关闭 Jekyll 处理，避免下划线开头的资源被忽略。所有资源均为相对路径（`./styles.css`、`./vendor/three.min.js`），因此在 `/CXL-RDMA/` 子路径下可直接加载。
+
+首次配置备忘：
+
+1. 仓库 **Settings → Pages**，Source 选 `Deploy from a branch`。
+2. Branch 选 `main`，Folder 选 `/ (root)`，Save。
+3. 在 **Actions** 页等 `pages build and deployment` 跑完，再访问上方在线地址。
+
+### 更新站点
+
+```bash
+git add -A
+git commit -m "更新说明"
+git push
+```
+
+推送后 Pages 会自动重新构建，约 1～2 分钟生效；若仍是旧页面，按 `Ctrl+F5` 硬刷新或开无痕窗口。
 
 ## 技术
 
