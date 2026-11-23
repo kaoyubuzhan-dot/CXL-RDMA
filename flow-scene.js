@@ -549,7 +549,6 @@ window.FLOW_SCENE = (function () {
               { x: b.x, y: L.fabric.y + L.fabric.h + 8 }, { x: b.x, y: b.y - 52 },
               { x: b.x + 26, y: b.y - 52 }];
     later(function () {
-      token('kv', { x: s.x, y: s.y }, { size: 10 });
       var t2 = token('rep', { x: cp[0].x, y: cp[0].y }, { size: 12, label: 'COPY' });
       move(t2, cp, { dur: 1800, keep: true });
     }, 1900);
