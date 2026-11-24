@@ -20,8 +20,8 @@ window.__RENDER_FLOW__ = (function () {
     });
   }
   function st() {
-    if (!STATE.flow) STATE.flow = { scenario: 'S1', stage: 0, playing: false, view: '3d' };
-    if (!STATE.flow.view) STATE.flow.view = '3d';
+    if (!STATE.flow) STATE.flow = { scenario: 'S1', stage: 0, playing: false, view: 'svg' };
+    if (!STATE.flow.view) STATE.flow.view = 'svg';
     return STATE.flow;
   }
   function sc() { return F.pick(st().scenario); }
@@ -159,8 +159,8 @@ window.__RENDER_FLOW__ = (function () {
         (s.playing ? '❚❚' : '▶') + '</button>' +
       '<button type="button" class="fl-btn" data-act="next" title="下一阶段">▶</button>' +
       '<button type="button" class="fl-btn" data-act="end" title="跳到最后">⏭</button>' +
-      '<button type="button" class="fl-btn fl-btn--view" data-act="view" title="切换三维 / 原理示意">' +
-        (st().view === 'svg' ? '2D' : '3D') + '</button>' +
+      '<button type="button" class="fl-btn fl-btn--view" data-act="view" title="在三维集群中查看该阶段（可选）">' +
+        (st().view === 'svg' ? '三维' : '2D') + '</button>' +
       '</div>';
     h += '<div class="fl-ticks">';
     F.STAGES.forEach(function (x, i) {
