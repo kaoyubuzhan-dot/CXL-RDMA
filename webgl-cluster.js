@@ -93,6 +93,29 @@
       var ml = [];
       for (i = 0; i < 4; i++) ml.push({ p: [-.14 + i * .07, mhdY, RD / 2 - .042] });
       g.add(U.inst(U.geoBox(.01, .006, .003), 'ledCxl', ml));
+
+      /* CXL Switch：主机端口汇聚 → MHD（对应需求文档「连接数 ≠ 容量」） */
+      var swY = .056 + 26 * UH;
+      var sw = U.boxE(RW - .16, 1.6 * UH, RD - .24, 'switchBody', { color: 0x53e3c4, opacity: .82 });
+      sw.position.set(0, swY, .02); g.add(sw);
+      var swLeds = [];
+      for (i = 0; i < 6; i++) swLeds.push({ p: [-.13 + i * .052, swY + .014, RD / 2 - .1] });
+      g.add(U.inst(U.geoBox(.008, .005, .003), 'ledCxl', swLeds));
+
+      /* 主机端口连线：MHD ↔ Switch（4 条，示意 2 个主机口 × 2 条链路） */
+      var cables = [];
+      for (i = 0; i < 4; i++) cables.push({ p: [-.12 + i * .08, .056 + 24.55 * UH, .3] });
+      g.add(U.inst(U.geoBox(.012, 1.02 * UH, .012), 'ledCxl', cables));
+
+      /* MHD 容量条：R1 约 320/512，R3 约 192/512 */
+      var capW = RW - .18;
+      var usedR = (id === 'R3') ? .375 : .625;
+      var capBg = U.box(capW, .014, .004, 'frameDark');
+      capBg.position.set(0, mhdY - 1.16 * UH, RD / 2 - .012); g.add(capBg);
+      var capFill = U.box(capW * usedR, .014, .006, 'ledCxl');
+      capFill.position.set(-capW * (1 - usedR) / 2, mhdY - 1.16 * UH, RD / 2 - .009); g.add(capFill);
+      var mhdTag = U.decal((id === 'R3' ? 'MHD 192/512' : 'MHD 320/512'), .2, .026, '#8ff2dd', 26);
+      mhdTag.position.set(0, mhdY + .052, RD / 2 - .006); g.add(mhdTag);
     } else {
       var blk = [];
       for (var u = 23; u <= 25; u++) blk.push({ p: [0, .056 + (u - 1) * UH + UH / 2, RD / 2 - .05] });
@@ -333,10 +356,10 @@
     all:  { pos: [5.4, 4.1, 6.2], tgt: [0, 1.05, 0] },
     ctrl: { pos: [3.6, 4.2, 3.6], tgt: [0, 1.45, 0] },
     pool: { pos: [4.4, 2.0, 0], tgt: [0, .55, 0] },
-    R1:   { pos: [-2.9, 2.6, 3.9], tgt: [-.98, 1.05, .92] },
-    R2:   { pos: [2.9, 2.6, 3.9], tgt: [.98, 1.05, .92] },
-    R3:   { pos: [-2.9, 2.6, -3.9], tgt: [-.98, 1.05, -.92] },
-    R4:   { pos: [2.9, 2.6, -3.9], tgt: [.98, 1.05, -.92] }
+    R1:   { pos: [-4.6, 3.4, 5.0], tgt: [-.98, 1.0, .92] },
+    R2:   { pos: [4.6, 3.4, 5.0], tgt: [.98, 1.0, .92] },
+    R3:   { pos: [-4.6, 3.4, -5.0], tgt: [-.98, 1.0, -.92] },
+    R4:   { pos: [4.6, 3.4, -5.0], tgt: [.98, 1.0, -.92] }
   };
   function flyTo(k) {
     var c = CAM[k] || CAM.all;

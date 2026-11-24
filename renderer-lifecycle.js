@@ -264,7 +264,14 @@
   function renderAll() {
     ensureDom();
     renderLeft(); renderRight(); renderKpi(); renderBar();
-    if (gl && gl.available) gl.toggleLabels(true);
+    if (gl && gl.available) {
+      gl.toggleLabels(true);
+      /* 首屏加载（非切换进入）时也支持 ?cam= 直达机位 */
+      try {
+        var q = new URLSearchParams(location.search).get('cam');
+        if (q && ['all', 'R1', 'R2', 'R3', 'R4', 'ctrl', 'pool'].indexOf(q) >= 0) gl.flyTo(q);
+      } catch (e) {}
+    }
   }
 
   /* ── 与 app-controller 的接缝 ── */
