@@ -49,6 +49,26 @@
 #app[data-page="run"] .analysis{display:none!important}
 #app[data-page="run"] .stage{padding:0}
 
+/* 生命周期页的浮动控制栏只在该页显示，避免泄漏到其它页遮挡内容 */
+#app:not([data-page="lc"]) #lc-bar,
+#app:not([data-page="lc"]) #lc-top{display:none!important}
+#app[data-page="lc"] #lc-bar{left:14px;right:14px;gap:10px}
+#lc-bar .lc-cams{margin-left:2px;flex:none;padding-left:10px;border-left:1px solid rgba(167,197,215,.14)}
+#lc-bar .lc-cams .mini-btn{height:22px;padding:0 6px;font-size:9px}
+
+/* 窄屏：收窄左右栏，给舞台更多宽度；控制台控件同步压缩 */
+@media(max-width:1400px){
+  :root{--side-l:250px;--side-r:286px}
+  .fl-btn{width:26px;height:24px}
+  .fl-btn--play{width:34px}
+  .fl-btn--view{width:30px}
+  .fl-tick{padding:4px 4px 3px}
+  .fl-tick em{font-size:9.5px;letter-spacing:0}
+  .fl-tick span{font-size:7.5px}
+  .fl-kpi{min-width:40px}
+  .fl-kpi b{font-size:10.5px}
+}
+
 /* 三维舞台：与三维生命周期页共用 #gllc 容器 */
 #app[data-page="run"].flow-3d #gllc{
   display:block;inset:0 0 122px 0;
@@ -203,31 +223,31 @@
 /* ============================================================
  * 5. SVG 场景
  * ============================================================ */
-.fx-t1{font-family:var(--mono);font-size:10px;letter-spacing:.14em;fill:#cfe3ec}
-.fx-t2{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;fill:#8ea7b6}
-.fx-t3{font-family:var(--mono);font-size:8px;letter-spacing:.05em;fill:#6d8595}
-.fx-t4{font-family:var(--mono);font-size:7px;letter-spacing:.08em;fill:#5b7182}
+.fx-t1{font-family:var(--mono);font-size:13px;letter-spacing:.12em;fill:#d6e8f0}
+.fx-t2{font-family:var(--mono);font-size:11px;letter-spacing:.1em;fill:#9db6c5}
+.fx-t3{font-family:var(--mono);font-size:11.5px;letter-spacing:.03em;fill:#8ba3b2}
+.fx-t4{font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;fill:#7c93a4}
 
 .fx-bar{fill:rgba(12,24,33,.92);stroke:rgba(167,197,215,.28);stroke-width:1}
 .fx-chip{fill:rgba(95,159,232,.22);stroke:rgba(95,159,232,.5);stroke-width:.6}
 
 .fx-rack{fill:rgba(10,19,26,.55);stroke:rgba(167,197,215,.18);stroke-width:1}
 .fx-rack-hd{fill:rgba(18,33,44,.85);stroke:rgba(167,197,215,.18);stroke-width:1}
-.fx-rack-id{font-family:var(--mono);font-size:13px;letter-spacing:.08em;fill:#dfeaf0}
+.fx-rack-id{font-family:var(--mono);font-size:17px;letter-spacing:.08em;fill:#e6f2f8}
 .rack:hover .fx-rack{stroke:rgba(167,197,215,.38)}
 .fx-rack.is-sel{stroke:var(--accent);fill:rgba(var(--accent-rgb),.07)}
 
 .fx-node{fill:rgba(16,29,38,.9);stroke:rgba(167,197,215,.16);stroke-width:.8;transition:.2s}
 .node--cxl .fx-node{stroke:rgba(var(--cxl-rgb),.32)}
 .node:hover .fx-node{stroke:rgba(var(--accent-rgb),.6)}
-.fx-node-id{font-family:var(--mono);font-size:10px;letter-spacing:.06em;fill:#d5e5ee}
+.fx-node-id{font-family:var(--mono);font-size:13px;letter-spacing:.06em;fill:#e2eef5}
 .fx-pill{fill:rgba(var(--cxl-rgb),.12);stroke:rgba(var(--cxl-rgb),.5);stroke-width:.6}
-.fx-pill-t{font-family:var(--mono);font-size:6.5px;letter-spacing:.06em;fill:var(--cxl)}
+.fx-pill-t{font-family:var(--mono);font-size:9px;letter-spacing:.04em;fill:var(--cxl)}
 .fx-hbm{fill:rgba(6,12,17,.9);stroke:rgba(167,197,215,.14);stroke-width:.6}
 
 .fx-mhd{fill:rgba(9,26,26,.85);stroke:rgba(var(--cxl-rgb),.34);stroke-width:.9;transition:.2s}
 .mhd:hover .fx-mhd{stroke:rgba(var(--cxl-rgb),.8)}
-.fx-mhd-id{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;fill:#b8e6dc}
+.fx-mhd-id{font-family:var(--mono);font-size:12.5px;letter-spacing:.05em;fill:#c8ebdf}
 .fx-mhd-empty{fill:rgba(8,14,19,.5);stroke:rgba(167,197,215,.12);stroke-width:.8;stroke-dasharray:3 4}
 .fx-bar-bg{fill:rgba(167,197,215,.1)}
 .fx-bar-fill{fill:var(--cxl);opacity:.75;transition:width .5s}
@@ -239,8 +259,8 @@
 .fx-pool-slot.is-used{fill:rgba(var(--rdma-rgb),.22);stroke:rgba(var(--rdma-rgb),.45)}
 .fx-ctrl-card{fill:rgba(15,28,37,.75);stroke:rgba(167,197,215,.14);stroke-width:.8;transition:.25s}
 .fx-ctrl-edge{fill:rgba(167,197,215,.25);transition:.25s}
-.fx-ctrl-t{font-family:var(--mono);font-size:9px;letter-spacing:.08em;fill:#c2d5e0}
-.fx-ctrl-st{font-family:var(--mono);font-size:7.5px;letter-spacing:.1em;fill:#5b7182;transition:.25s}
+.fx-ctrl-t{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;fill:#d3e4ee}
+.fx-ctrl-st{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;fill:#6f8697;transition:.25s}
 .ctrl-card.is-on .fx-ctrl-card{fill:rgba(20,44,52,.9);stroke:rgba(var(--accent-rgb),.55)}
 .ctrl-card.is-on .fx-ctrl-edge{fill:var(--accent)}
 .ctrl-card.is-on .fx-ctrl-t{fill:#eaf6fb}
@@ -277,11 +297,11 @@
 .fx-token{filter:url(#flowGlow)}
 .fx-token-c{stroke:rgba(4,9,13,.85);stroke-width:.8}
 .fx-token--rep .fx-token-c{fill:var(--shared)}
-.fx-token-l{font-family:var(--mono);font-size:6.5px;letter-spacing:.08em;fill:#cfe3ec}
+.fx-token-l{font-family:var(--mono);font-size:9px;letter-spacing:.06em;fill:#d6e8f0}
 
 .fx-hint-box{fill:rgba(10,19,26,.6);stroke:rgba(167,197,215,.14);stroke-width:.8}
 .fx-callout-box{fill:rgba(8,17,23,.94);stroke:rgba(167,197,215,.28);stroke-width:.8}
-.fx-callout-t{font-family:var(--cn);font-size:9.5px;letter-spacing:.05em;fill:#e6f1f6}
+.fx-callout-t{font-family:var(--cn);font-size:12px;letter-spacing:.04em;fill:#eef8fc}
 
 /* ============================================================
  * 6. 启动遮罩（打开页面时的 INITIALISING）

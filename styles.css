@@ -688,9 +688,9 @@ button:focus-visible,input:focus-visible{outline:1px solid var(--accent);outline
 .lc-timeline::-webkit-scrollbar{height:0}
 .lc-track{display:flex;align-items:flex-start;gap:0;min-width:max-content;position:relative;padding-top:5px}
 .lc-track::before{content:"";position:absolute;left:6px;right:6px;top:8px;height:1px;background:rgba(167,197,215,.16)}
-.lc-tick{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:86px;padding:0 4px;cursor:pointer;background:none}
+.lc-tick{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:68px;padding:0 3px;cursor:pointer;background:none}
 .lc-tick i{width:9px;height:9px;border-radius:50%;background:#1c2b36;border:1px solid rgba(167,197,215,.4);z-index:1;transition:.2s}
-.lc-tick span{font-family:var(--mono);font-size:8.5px;letter-spacing:.08em;color:#5d7484;white-space:nowrap}
+.lc-tick span{font-family:var(--mono);font-size:8px;letter-spacing:.04em;color:#5d7484;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .lc-tick:hover span{color:#9fb8c5}
 .lc-tick.done i{background:#2b8a72;border-color:#53e3c4}
 .lc-tick.cur i{background:#53e3c4;border-color:#91e4ff;box-shadow:0 0 10px rgba(83,227,196,.8)}

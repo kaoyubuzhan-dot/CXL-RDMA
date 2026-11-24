@@ -43,10 +43,6 @@
     ui.host.id = 'gllc';
     stage.appendChild(ui.host);
 
-    ui.top = document.createElement('div');
-    ui.top.id = 'lc-top';
-    stage.appendChild(ui.top);
-
     ui.bar = document.createElement('div');
     ui.bar.id = 'lc-bar';
     stage.appendChild(ui.bar);
@@ -190,7 +186,7 @@
     return '<div class="kpi-cell"><span class="kpi-label">' + lb + '</span><b class="cxl">' + esc(v) + '</b></div>';
   }
 
-  /* ── 底部：播放 + 时间轴 ── */
+  /* ── 底部：播放 + 时间轴 + 机位（唯一控制栏） ── */
   function renderBar() {
     var s = st(), sc = scene();
     var h = '<div class="lc-transport">' +
@@ -202,13 +198,26 @@
       '<div class="lc-timeline"><div class="lc-track">';
     sc.steps.forEach(function (stp, i) {
       var cls = i < s.step ? 'done' : i === s.step ? 'cur' : '';
+      var si = SG_IDX(stp.stage);
+      /* 同一阶段可能拆成多个步骤，加序号避免出现两个一样的「推理生成」 */
+      var same = sc.steps.filter(function (x) { return x.stage === stp.stage; });
+      var lab = same.length > 1
+        ? LC.STAGES[si].zh + ' ' + (same.indexOf(stp) + 1) + '/' + same.length
+        : LC.STAGES[si].zh;
       h += '<button type="button" class="lc-tick ' + cls + '" data-i="' + i + '" title="' + esc(stp.ev[0]) + '"><i></i><span>' +
-        LC.STAGES[SG_IDX(stp.stage)].zh + '</span></button>';
+        lab + '</span></button>';
     });
     h += '</div></div>';
+    h += '<div class="lc-cams">' +
+      [['all', '全景'], ['R1', 'R1'], ['R2', 'R2'], ['R3', 'R3'], ['R4', 'R4'], ['ctrl', '控制器'], ['pool', '内存池']]
+        .map(function (c) { return '<button type="button" class="mini-btn" data-cam="' + c[0] + '">' + c[1] + '</button>'; })
+        .join('') + '</div>';
     ui.bar.innerHTML = h;
 
     $('lc-prev').addEventListener('click', function () { pause(); go(Math.max(0, s.step - 1)); });
+    ui.bar.querySelectorAll('[data-cam]').forEach(function (b) {
+      b.addEventListener('click', function () { if (gl) gl.flyTo(b.dataset.cam); });
+    });
     $('lc-next').addEventListener('click', function () { pause(); go(Math.min(sc.steps.length - 1, s.step + 1)); });
     $('lc-play').addEventListener('click', function () { s.playing ? pause() : play(); });
     $('lc-reset').addEventListener('click', function () { pause(); go(0); });
@@ -254,7 +263,7 @@
 
   function renderAll() {
     ensureDom();
-    renderTop(); renderLeft(); renderRight(); renderKpi(); renderBar();
+    renderLeft(); renderRight(); renderKpi(); renderBar();
     if (gl && gl.available) gl.toggleLabels(true);
   }
 

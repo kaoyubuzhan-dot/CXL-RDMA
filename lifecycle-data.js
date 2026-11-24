@@ -81,7 +81,7 @@
           note: '长期高热度 + 访问集中在本机架 + MHD 有容量 → 进本机架共享 MHD。',
           dir: { kv: 'KV-001', prod: 'R1 / N1', loc: 'R1 · GPU HBM', tier: 'HBM', rep: '—', ver: 'V1', hot: '82', last: 'T+0' } },
 
-        { stage: 'relocate', cam: 'R1',
+        { stage: 'decide', cam: 'R1',
           act: { mkMove: { kv: 'KV-001', from: 'R1.N1', to: 'R1.MHD' }, paths: [P('cxl', 'R1.N1', 'R1.MHD', 2)] },
           ev: ['KV-001 16 GB 下沉 → Rack 1 Shared MHD', 'MHD-1 占用 320 → 336 GB'],
           note: '写入走机架内 CXL 链路（load/store 语义），不占用 RDMA 网络。',
