@@ -86,9 +86,9 @@
     /* MHD / 空槽盲板 */
     var mhdY = .056 + 22 * UH + UH / 2;
     if (cxl) {
-      var mh = U.boxE(RW - .12, 3 * UH - .006, RD - .14, 'mhdUnit', { color: 0x53e3c4, opacity: .92 });
+      var mh = U.boxE(RW - .12, 3 * UH - .006, RD - .14, 'mhdUnit', { color: 0x53e3c4, opacity: .58 });
       mh.userData.mesh.material.emissive.setHex(C.cxl);
-      mh.userData.mesh.material.emissiveIntensity = .6;
+      mh.userData.mesh.material.emissiveIntensity = .42;
       mh.position.set(0, mhdY, .04); g.add(mh);
       var ml = [];
       for (i = 0; i < 4; i++) ml.push({ p: [-.14 + i * .07, mhdY, RD / 2 - .042] });
@@ -114,8 +114,10 @@
       capBg.position.set(0, mhdY - 1.16 * UH, RD / 2 - .012); g.add(capBg);
       var capFill = U.box(capW * usedR, .014, .006, 'ledCxl');
       capFill.position.set(-capW * (1 - usedR) / 2, mhdY - 1.16 * UH, RD / 2 - .009); g.add(capFill);
-      var mhdTag = U.decal((id === 'R3' ? 'MHD 192/512' : 'MHD 320/512'), .2, .026, '#8ff2dd', 26);
-      mhdTag.position.set(0, mhdY + .052, RD / 2 - .006); g.add(mhdTag);
+      var mhdTag = U.decal((id === 'R3' ? 'MHD 192/512' : 'MHD 320/512'), .24, .032, '#c9fff2', 30);
+      mhdTag.position.set(0, mhdY + .062, RD / 2 - .006); g.add(mhdTag);
+      var tagBg = U.box(.27, .046, .003, 'frameDark');
+      tagBg.position.set(0, mhdY + .059, RD / 2 - .012); g.add(tagBg);
     } else {
       var blk = [];
       for (var u = 23; u <= 25; u++) blk.push({ p: [0, .056 + (u - 1) * UH + UH / 2, RD / 2 - .05] });
@@ -303,9 +305,22 @@
     labelDefs = ['R1', 'R2', 'R3', 'R4'].map(function (id) {
       return { id: id, p: new THREE.Vector3(RACK_POS[id].x, RH + .16, RACK_POS[id].z), txt: id };
     });
+    /* CXL 机架补部件标注：默认视角下也能看清 MHD 容量与 CXL Switch */
+    ['R1', 'R3'].forEach(function (id) {
+      var pos = RACK_POS[id];
+      labelDefs.push({
+        id: id + '.MHD', sub: 1, txt: id === 'R3' ? 'MHD 192/512 GB' : 'MHD 320/512 GB',
+        p: new THREE.Vector3(pos.x, .056 + 22.5 * UH, pos.z + RD / 2 + .04)
+      });
+      labelDefs.push({
+        id: id + '.SW', sub: 1, txt: 'CXL SWITCH · 2 HOST',
+        p: new THREE.Vector3(pos.x, .056 + 26.4 * UH, pos.z + RD / 2 + .04)
+      });
+    });
     labelEls = labelDefs.map(function (d) {
       var el = document.createElement('div');
-      el.className = 'gll-lbl'; el.textContent = d.txt;
+      el.className = 'gll-lbl' + (d.sub ? ' gll-lbl--sub' : '');
+      el.textContent = d.txt;
       labelLayer.appendChild(el);
       return el;
     });

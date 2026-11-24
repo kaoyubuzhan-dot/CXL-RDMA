@@ -68,6 +68,12 @@
   .fl-kpi b{font-size:10.5px}
 }
 
+/* 06 页部件级浮动标注（MHD / CXL Switch） */
+.gll-lbl--sub{font-size:9px;letter-spacing:.06em;color:#8ff2dd;
+  padding:1px 5px;background:rgba(4,12,16,.72);border:1px solid rgba(83,227,196,.28);
+  transform:translate(-50%,-50%)}
+.gll-lbl--sub::after{display:none}
+
 /* 离开运行流程页时隐藏其舞台容器，避免覆盖其它页面的 SVG / 3D 视图 */
 #app:not([data-page="run"]) #flow-host,
 #app:not([data-page="run"]) #flow-deck{display:none}
