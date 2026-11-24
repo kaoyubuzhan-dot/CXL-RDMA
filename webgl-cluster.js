@@ -308,13 +308,25 @@
     /* CXL 机架补部件标注：默认视角下也能看清 MHD 容量与 CXL Switch */
     ['R1', 'R3'].forEach(function (id) {
       var pos = RACK_POS[id];
+      var flip = id === 'R3' ? -1 : 1;   /* 背面机架朝相反方向错开，避免压在一起 */
       labelDefs.push({
         id: id + '.MHD', sub: 1, txt: id === 'R3' ? 'MHD 192/512 GB' : 'MHD 320/512 GB',
+        ox: 34 * flip, oy: 10,
         p: new THREE.Vector3(pos.x, .056 + 22.5 * UH, pos.z + RD / 2 + .04)
       });
       labelDefs.push({
         id: id + '.SW', sub: 1, txt: 'CXL SWITCH · 2 HOST',
+        ox: 34 * flip, oy: -14,
         p: new THREE.Vector3(pos.x, .056 + 26.4 * UH, pos.z + RD / 2 + .04)
+      });
+    });
+    /* 纯 RDMA 机架：明确标注没有 CXL 设备 */
+    ['R2', 'R4'].forEach(function (id) {
+      var pos = RACK_POS[id];
+      labelDefs.push({
+        id: id + '.RDMA', sub: 1, txt: 'NO CXL · RDMA ONLY',
+        ox: id === 'R4' ? -34 : 34, oy: 8,
+        p: new THREE.Vector3(pos.x, .056 + 22.5 * UH, pos.z + RD / 2 + .04)
       });
     });
     labelEls = labelDefs.map(function (d) {
@@ -334,8 +346,9 @@
       var el = labelEls[i];
       if (_v3.z > 1) { el.style.opacity = '0'; return; }
       el.style.opacity = '1';
-      el.style.left = ((_v3.x + 1) / 2 * w) + 'px';
-      el.style.top = ((-_v3.y + 1) / 2 * h) + 'px';
+      /* ox/oy 为像素级微调：背面机架透视压缩后标注会挤在一起，用它拉开 */
+      el.style.left = ((_v3.x + 1) / 2 * w + (d.ox || 0)) + 'px';
+      el.style.top = ((-_v3.y + 1) / 2 * h + (d.oy || 0)) + 'px';
       if (d.id === selectedId) el.classList.add('sel'); else el.classList.remove('sel');
     });
   }
