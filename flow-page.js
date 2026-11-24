@@ -20,7 +20,8 @@ window.__RENDER_FLOW__ = (function () {
     });
   }
   function st() {
-    if (!STATE.flow) STATE.flow = { scenario: 'S1', stage: 0, playing: false };
+    if (!STATE.flow) STATE.flow = { scenario: 'S1', stage: 0, playing: false, view: '3d' };
+    if (!STATE.flow.view) STATE.flow.view = '3d';
     return STATE.flow;
   }
   function sc() { return F.pick(st().scenario); }
@@ -158,6 +159,8 @@ window.__RENDER_FLOW__ = (function () {
         (s.playing ? '❚❚' : '▶') + '</button>' +
       '<button type="button" class="fl-btn" data-act="next" title="下一阶段">▶</button>' +
       '<button type="button" class="fl-btn" data-act="end" title="跳到最后">⏭</button>' +
+      '<button type="button" class="fl-btn fl-btn--view" data-act="view" title="切换三维 / 原理示意">' +
+        (st().view === 'svg' ? '2D' : '3D') + '</button>' +
       '</div>';
     h += '<div class="fl-ticks">';
     F.STAGES.forEach(function (x, i) {
@@ -187,6 +190,7 @@ window.__RENDER_FLOW__ = (function () {
         else if (a === 'next') { pause(); go(Math.min(6, s.stage + 1)); }
         else if (a === 'reset') { pause(); go(0); }
         else if (a === 'end') { pause(); go(6); }
+        else if (a === 'view') { toggleView(); }
       });
     });
     ui.deck.querySelectorAll('[data-tick]').forEach(function (b) {
@@ -202,12 +206,44 @@ window.__RENDER_FLOW__ = (function () {
     if (l) l.textContent = msg;
   }
 
+  /* ───────── 舞台播放：优先三维，失败回落 SVG ───────── */
+  function setMode(is3d) {
+    if (ui.host) ui.host.classList.toggle('is-3d', !!is3d);
+    var app = $('app');
+    if (app) app.classList.toggle('flow-3d', !!is3d);
+  }
+  function playStage(sg, cur) {
+    var want3d = st().view !== 'svg';
+    var can3d = want3d && window.FLOW_3D && window.FLOW_3D.available();
+    /* 先让容器可见，WebGL 容器为 display:none 时尺寸为 0，会导致画布与镜头都不对 */
+    setMode(!!can3d);
+    if (can3d) {
+      var ok = false;
+      try { ok = window.FLOW_3D.play(sg, cur); } catch (e) { ok = false; }
+      if (ok) {
+        requestAnimationFrame(function () {
+          try { window.FLOW_3D.resize(); } catch (e) {}
+        });
+        return;
+      }
+      setMode(false);
+    }
+    scene.play(sg, cur);
+  }
+  function toggleView() {
+    var s = st();
+    s.view = (s.view === 'svg') ? '3d' : 'svg';
+    pushLog('切换视图 → ' + (s.view === 'svg' ? '原理示意（2D）' : '三维硬件'));
+    pause();
+    go(s.stage);
+  }
+
   /* ───────── 阶段切换 ───────── */
   function go(i) {
     var s = st();
     s.stage = Math.max(0, Math.min(F.STAGES.length - 1, i));
     var sg = stage(), cur = sc();
-    scene.play(sg, cur);
+    playStage(sg, cur);
     if (sg.id === 'access') scene.select('R1');
     pushLog(sg.n + ' ' + sg.zh + ' · ' + F.fill(sg.caption, cur).slice(0, 46) + '…');
     if (window.__SIM__ && S.log) { try { S.log('[FLOW ' + sg.n + '] ' + sg.zh); } catch (e) {} }
@@ -257,6 +293,9 @@ window.__RENDER_FLOW__ = (function () {
       if (idx >= 0) st().stage = idx;
       var sid = p.get('flowsc');
       if (sid) st().scenario = sid;
+      var vw = p.get('view');
+      if (vw === 'svg' || vw === '2d') st().view = 'svg';
+      else if (vw === '3d') st().view = '3d';
       if (p.get('play') === '1') st().playing = true;
     } catch (e) {}
   }
@@ -265,12 +304,13 @@ window.__RENDER_FLOW__ = (function () {
     ensureDom();
     initFromUrl();
     renderLeft(); renderRight(); renderDeck();
-    scene.play(stage(), sc());
+    playStage(stage(), sc());
     if (st().playing) play();
   }
   function onEnter() {
     ensureDom();
-    scene.play(stage(), sc());
+    playStage(stage(), sc());
+    if (window.FLOW_3D) { try { window.FLOW_3D.resize(); } catch (e) {} }
     renderDeck();
   }
   function sync() { if (ui.host) ui.host.classList.toggle('is-live', st().playing); }
