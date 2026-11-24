@@ -279,7 +279,12 @@
     if (gl && gl.available) {
       var step = curStep();
       gl.applyStep(step.act, null);
-      if (step.cam) gl.flyTo(step.cam);
+      var cam = step.cam;
+      try {
+        var q = new URLSearchParams(location.search).get('cam');
+        if (q && ['all', 'R1', 'R2', 'R3', 'R4', 'ctrl', 'pool'].indexOf(q) >= 0) cam = q;
+      } catch (e) {}
+      if (cam) gl.flyTo(cam);
     }
   }
 
