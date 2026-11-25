@@ -143,6 +143,45 @@
   background:rgba(var(--cxl-rgb),.1);box-shadow:0 0 10px rgba(var(--cxl-rgb),.22)}
 .fl-dep-t.is-cur b{color:var(--cxl)}
 .fl-dep-line{flex:0 0 14px;height:1px;background:rgba(167,197,215,.22)}
+/* 手动模式切换与可点击部署芯片 */
+.fl-dep-mode{display:flex;gap:0;margin-left:2px}
+.fl-dep-mb{font-family:var(--cn);font-size:10px;line-height:1;padding:4px 9px;color:var(--deep);
+  background:rgba(8,14,19,.5);border:1px solid rgba(167,197,215,.18);cursor:pointer;transition:.25s}
+.fl-dep-mb:first-child{border-radius:2px 0 0 2px}
+.fl-dep-mb:last-child{border-radius:0 2px 2px 0;border-left:none}
+.fl-dep-mb.is-on{color:var(--cxl);border-color:rgba(var(--cxl-rgb),.6);background:rgba(var(--cxl-rgb),.1)}
+.fl-dep-t{cursor:pointer}
+.fl-dep-t.is-act{opacity:1;border-color:rgba(var(--cxl-rgb),.8);cursor:pointer;
+  animation:fx-dep-pulse 1.3s ease-in-out infinite}
+.fl-dep-t.is-act b::after{content:' ▸ 点击部署';font-size:9px;color:var(--cxl)}
+@keyframes fx-dep-pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(var(--cxl-rgb),.35)}
+  50%{box-shadow:0 0 12px 2px rgba(var(--cxl-rgb),.35)}
+}
+
+/* ── 全局部署决策矩阵浮层（阶段 03） ── */
+.fx-dec-box{fill:rgba(8,14,19,.93);stroke:rgba(228,182,107,.45);stroke-width:1;filter:url(#flowGlow)}
+.fx-dec-col{opacity:.35;transition:opacity .4s}
+.fx-dec-col.is-on{opacity:1}
+.fx-dec-col.is-win .fx-t2{fill:var(--cxl)}
+.fx-dec-f{font-family:var(--mono);font-size:11px;fill:#8fa6b5}
+
+/* ── 右栏：全局部署决策卡 ── */
+.fl-dec-note{font-family:var(--mono);font-size:8.5px;letter-spacing:.04em;color:var(--deep);
+  padding:4px 2px 6px;border-bottom:1px dashed rgba(167,197,215,.14);margin-bottom:6px}
+.fl-dec-row{display:grid;grid-template-columns:26px 1fr 24px auto;grid-template-areas:
+  'id bar em pick' 'id why why why';gap:2px 8px;align-items:center;padding:5px 0}
+.fl-dec-row + .fl-dec-row{border-top:1px dashed rgba(167,197,215,.1)}
+.fl-dec-row b{grid-area:id;font-family:var(--mono);font-size:11px;color:var(--soft)}
+.fl-dec-row.is-pick b{color:var(--cxl)}
+.fl-dec-bar{grid-area:bar;height:5px;background:rgba(167,197,215,.14);overflow:hidden}
+.fl-dec-bar i{display:block;height:100%;background:rgba(108,130,144,.6)}
+.fl-dec-row.is-pick .fl-dec-bar i{background:rgba(var(--cxl-rgb),.85)}
+.fl-dec-row em{grid-area:em;font-family:var(--mono);font-size:10.5px;font-style:normal;color:var(--soft)}
+.fl-dec-row span{grid-area:pick;font-family:var(--cn);font-size:9.5px;color:var(--deep)}
+.fl-dec-row.is-pick span{color:var(--cxl)}
+.fl-dec-row p{grid-area:why;margin:0;font-family:var(--cn);font-size:9.5px;line-height:1.45;
+  color:rgba(167,197,215,.65)}
 
 /* ── 增量部署"长出来"动画 ── */
 .fx-grow{animation:fx-grow .8s cubic-bezier(.2,.85,.3,1.05) both}

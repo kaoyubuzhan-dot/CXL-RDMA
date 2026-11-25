@@ -38,6 +38,8 @@ window.FLOW_SCENE = (function () {
   var curSc = null;
   /* CXL 增量部署等级：0=T0 全RDMA · 1=T1 R1部署 · 2=T2 R3部署 · 3=T3 重分配 */
   var deployLv = -1, onDeployCb = null;
+  /* 自动模式：Controller 按决策在阶段内自动触发部署；手动模式：等待用户点击部署时间轴 */
+  var autoDeploy = true;
 
   function later(fn, ms) { var id = setTimeout(fn, ms); timers.push(id); return id; }
 
@@ -430,6 +432,7 @@ window.FLOW_SCENE = (function () {
     document.querySelectorAll('[data-ring]').forEach(function (n) { n.classList.remove('is-on'); });
     Object.keys(root.ctrlCards || {}).forEach(function (k) { card(k, false, 'IDLE'); });
     document.querySelectorAll('.fx-tags .fx-callout').forEach(function (n) { n.remove(); });
+    document.querySelectorAll('.fx-tags .fx-decision').forEach(function (n) { n.remove(); });
     document.querySelectorAll('.fx-node.is-hot, .fx-mhd.is-hot, .fx-hbm.is-hot, .fx-hbm.is-hit, .fx-mhd.is-cold, .fx-bar-fill.is-hit')
       .forEach(function (n) { n.classList.remove('is-hot', 'is-hit', 'is-cold'); });
   }
@@ -493,15 +496,56 @@ window.FLOW_SCENE = (function () {
     callout(L.fabric.x + 20, 630, '遥测通路', '仅元数据上行 · KV 本体不移动', '#e4b66b');
   }
 
+  /* ── 全局部署决策矩阵浮层（阶段 03）：
+     四机架 × 局部性/热度/拥塞/利用率/成本 加权评分 → 部署优先级 ── */
+  function decisionOverlay() {
+    var D = FLOW.DEPLOY_DECISION;
+    if (!D) return;
+    var p = L.pool;
+    var x = p.x, y = p.y - 30, w = p.w, hh = 112;
+    var g = el('g', { class: 'fx-decision' }, root.tags);
+    el('rect', { x: x, y: y, width: w, height: hh, rx: 2, class: 'fx-dec-box' }, g);
+    el('rect', { x: x, y: y, width: 2, height: hh, fill: '#e4b66b' }, g);
+    txt('CXL 增量部署 · 全局决策矩阵', { x: x + 14, y: y + 20, class: 'fx-t2' }, g);
+    txt('拓扑 · 历史热度 · 拥塞 · 利用率 · 成本 加权评分（示意，非实测）',
+      { x: x + w - 14, y: y + 20, class: 'fx-t4', 'text-anchor': 'end', fill: '#8fa6b5' }, g);
+    var cw = (w - 28) / D.racks.length;
+    D.racks.forEach(function (r, i) {
+      var cx = x + 14 + i * cw;
+      var col = el('g', { class: 'fx-dec-col', 'data-dec': r.id }, g);
+      txt(r.id, { x: cx, y: y + 42, class: 'fx-t2' }, col);
+      txt(r.pick, {
+        x: cx, y: y + 42, class: 'fx-t4', 'text-anchor': 'end',
+        fill: r.score >= 60 ? '#53e3c4' : '#6c8290'
+      }, col);
+      el('rect', { x: cx, y: y + 50, width: cw - 26, height: 5, rx: 2, class: 'fx-bar-bg' }, col);
+      el('rect', { x: cx, y: y + 50, width: (cw - 26) * r.score / 100, height: 5, rx: 2,
+        class: 'fx-bar-fill', fill: r.score >= 60 ? 'rgba(83,227,196,.85)' : 'rgba(108,130,144,.55)' }, col);
+      txt(String(r.score), { x: cx + cw - 22, y: y + 58, class: 'fx-t4', fill: '#cfe3ee' }, col);
+      txt('局部 ' + r.locality + '% · 热度 ' + r.hot, { x: cx, y: y + 74, class: 'fx-dec-f' }, col);
+      txt('拥塞 ' + r.cong + '% · 利用 ' + r.util + '% · 成本 ' + r.cost, { x: cx, y: y + 90, class: 'fx-dec-f' }, col);
+      later(function () { col.classList.add('is-on'); }, 500 + i * 450);
+    });
+    /* 首选机架最终高亮 */
+    later(function () {
+      var first = g.querySelector('[data-dec="R1"]');
+      if (first) first.classList.add('is-win');
+    }, 2400);
+  }
+
   function animDecide(sc) {
     card('profiler', true, '局部性 ' + sc.local + '%');
-    [['R1', 'MHD-1', true], ['R3', 'MHD-3', false]].forEach(function (c, i) {
+    later(function () {
+      decisionOverlay();
+      card('place', true, '全局评估中…');
+    }, 200);
+    [['R1', 'MHD-1', '选中 · 评分 86'], ['R3', 'MHD-3', '候选 · 拥塞驱动']].forEach(function (c, i) {
       later(function () {
         ring(c[0], true);
         card('topo', true, 'CXL 可达');
         var x = rackX(rackIdxOf(c[0]));
-        callout(x + 4, L.rack.y - 46, c[0] + ' / ' + c[1],
-          c[2] ? '选中 · 本地命中' : '候选 · 跨机架', c[2] ? '#53e3c4' : '#5f9fe8');
+        callout(x + 4, 78, c[0] + ' / ' + c[1] + ' · ' + c[2], null,
+          c[2].indexOf('选中') === 0 ? '#53e3c4' : '#5f9fe8');
       }, 400 + i * 900);
     });
     later(function () {
@@ -625,12 +669,15 @@ window.FLOW_SCENE = (function () {
     /* 部署等级对齐阶段起点（后退/跳转时同步降级或升级，不播动画） */
     var startLv = (FLOW.START_LEVEL && FLOW.START_LEVEL[idx] !== undefined) ? FLOW.START_LEVEL[idx] : 3;
     if (deployLv !== startLv) setDeployLevel(startLv, false);
-    /* 阶段内增量部署动画：T1 在 03 存储决策触发，T2/T3 在 06 迁移复制触发 */
-    if (stage.id === 'decide') {
-      later(function () { if (deployLv < 1) setDeployLevel(1, true); }, 1400);
-    } else if (stage.id === 'migrate') {
-      later(function () { if (deployLv < 2) setDeployLevel(2, true); }, 1500);
-      later(function () { if (deployLv < 3) setDeployLevel(3, true); }, 3300);
+    /* 自动模式：阶段内增量部署动画（T1 在 03 存储决策触发，T2/T3 在 06 迁移复制触发）；
+       手动模式：交由用户点击底部部署时间轴触发 */
+    if (autoDeploy) {
+      if (stage.id === 'decide') {
+        later(function () { if (deployLv < 1) setDeployLevel(1, true); }, 1400);
+      } else if (stage.id === 'migrate') {
+        later(function () { if (deployLv < 2) setDeployLevel(2, true); }, 1500);
+        later(function () { if (deployLv < 3) setDeployLevel(3, true); }, 3300);
+      }
     }
     var fn = ANIMS[stage.anim.type];
     if (fn) {
@@ -660,6 +707,7 @@ window.FLOW_SCENE = (function () {
   return {
     mount: mount, play: play, clear: clear, select: select,
     rackIdxOf: rackIdxOf, nodeAnchor: nodeAnchor, mhdAnchor: mhdAnchor,
-    setDeployLevel: setDeployLevel, deployLevel: deployLevel
+    setDeployLevel: setDeployLevel, deployLevel: deployLevel,
+    setAutoDeploy: function (on) { autoDeploy = !!on; }
   };
 })();

@@ -20,7 +20,7 @@ window.__RENDER_FLOW__ = (function () {
     });
   }
   function st() {
-    if (!STATE.flow) STATE.flow = { scenario: 'S1', stage: 0, playing: false };
+    if (!STATE.flow) STATE.flow = { scenario: 'S1', stage: 0, playing: false, mode: 'auto' };
     return STATE.flow;
   }
   function sc() { return F.pick(st().scenario); }
@@ -51,10 +51,14 @@ window.__RENDER_FLOW__ = (function () {
   function syncDepStrip(lv) {
     var strip = document.getElementById('fl-dep-strip');
     if (!strip) return;
+    var s = st();
+    var act1 = s.mode === 'manual' && lv < 1 && s.stage >= 2;
+    var act2 = s.mode === 'manual' && lv >= 1 && lv < 2 && s.stage >= 5;
     strip.querySelectorAll('[data-dep]').forEach(function (n) {
       var i = +n.getAttribute('data-dep');
       n.classList.toggle('is-done', lv > i);
       n.classList.toggle('is-cur', lv === i);
+      n.classList.toggle('is-act', (i === 1 && act1) || (i === 2 && act2));
     });
     var cnt = strip.querySelector('.fl-dep-cnt');
     if (cnt) cnt.textContent = (lv >= 2 ? 2 : lv) + ' / 4 机架';
@@ -146,6 +150,20 @@ window.__RENDER_FLOW__ = (function () {
       what('结果', F.fill(sg.res, s), 'res') +
       '</div>';
 
+    /* 阶段 03：呈现全局部署决策依据（全网证据加权评分） */
+    if (sg.id === 'decide' && F.DEPLOY_DECISION) {
+      h += '<div class="fl-card"><div class="fl-card-h"><i class="fl-bar"></i><span>全局部署决策</span><b>评分</b></div>' +
+        '<div class="fl-dec-note">局部性 · 历史热度 · 拥塞 · 利用率 · 成本 加权 · 示意非实测</div>' +
+        F.DEPLOY_DECISION.racks.map(function (r) {
+          return '<div class="fl-dec-row' + (r.score >= 60 ? ' is-pick' : '') + '">' +
+            '<b>' + r.id + '</b>' +
+            '<div class="fl-dec-bar"><i style="width:' + r.score + '%"></i></div>' +
+            '<em>' + r.score + '</em>' +
+            '<span>' + r.pick + '</span>' +
+            '<p>' + esc(r.why) + '</p></div>';
+        }).join('') + '</div>';
+    }
+
     h += '<div class="fl-card"><div class="fl-card-h"><i class="fl-bar"></i><span>路径图例</span><b>ENCODING</b></div>' +
       '<div class="fl-legend">' + F.LEGEND.map(function (l) {
         return '<span class="fl-lg"><i style="background:' + l.c + '"></i>' + l.t + '</span>';
@@ -186,14 +204,25 @@ window.__RENDER_FLOW__ = (function () {
     h += '</div>';
     h += '</div>';
 
-    /* 并行时间轴：CXL 增量部署（T0→T3，与上方 KV 生命周期对齐） */
+    /* 并行时间轴：CXL 增量部署（T0→T3，与上方 KV 生命周期对齐）
+       手动模式下 T1/T2 变为可点击按钮，由用户决定何时从全量 RDMA 跳转到增量 */
     var lv = scene.deployLevel ? scene.deployLevel() : 3;
+    var mode = st().mode || 'auto';
+    var idx = st().stage;
+    var act1 = mode === 'manual' && lv < 1 && idx >= 2;
+    var act2 = mode === 'manual' && lv >= 1 && lv < 2 && idx >= 5;
     h += '<div class="fl-dep" id="fl-dep-strip">';
     h += '<span class="fl-dep-h">CXL 增量部署</span><span class="fl-dep-cnt">' + (lv >= 2 ? 2 : lv) + ' / 4 机架</span>';
+    h += '<span class="fl-dep-mode"><button type="button" class="fl-dep-mb' + (mode === 'auto' ? ' is-on' : '') +
+      '" data-depmode="auto" title="Controller 按决策矩阵自动部署">自动</button>' +
+      '<button type="button" class="fl-dep-mb' + (mode === 'manual' ? ' is-on' : '') +
+      '" data-depmode="manual" title="由你点击 T1/T2 决定何时增量部署">手动</button></span>';
     h += F.DEP.map(function (d, i) {
       var cls = lv > i ? 'is-done' : lv === i ? 'is-cur' : '';
-      return '<div class="fl-dep-t ' + cls + '" data-dep="' + i + '" title="' + esc(d.brief) + '">' +
-        '<b>' + d.id + '</b><span>' + esc(d.zh) + '</span></div>' +
+      if ((i === 1 && act1) || (i === 2 && act2)) cls += ' is-act';
+      return '<button type="button" class="fl-dep-t ' + cls + '" data-dep="' + i +
+        '" title="' + esc(d.brief) + (i === 1 && act1 ? ' · 点击执行部署' : '') + '">' +
+        '<b>' + d.id + '</b><span>' + esc(d.zh) + '</span></button>' +
         (i < F.DEP.length - 1 ? '<i class="fl-dep-line"></i>' : '');
     }).join('');
     h += '</div>';
@@ -222,6 +251,57 @@ window.__RENDER_FLOW__ = (function () {
     ui.deck.querySelectorAll('[data-tick]').forEach(function (b) {
       b.addEventListener('click', function () { pause(); go(+b.getAttribute('data-tick')); });
     });
+    ui.deck.querySelectorAll('[data-depmode]').forEach(function (b) {
+      b.addEventListener('click', function () { setMode(b.getAttribute('data-depmode')); });
+    });
+    ui.deck.querySelectorAll('[data-dep]').forEach(function (b) {
+      b.addEventListener('click', function () { onDepClick(+b.getAttribute('data-dep')); });
+    });
+  }
+
+  /* ── 部署模式：自动（Controller 决策驱动）/ 手动（用户点击 T1/T2 触发跳转） ── */
+  function setMode(m) {
+    var s = st();
+    if (s.mode === m) return;
+    s.mode = m;
+    if (scene.setAutoDeploy) scene.setAutoDeploy(m === 'auto');
+    pushLog(m === 'auto' ? '切换自动模式：Controller 按全局决策自动部署'
+                         : '切换手动模式：请在部署时间轴点击 T1 / T2 执行增量部署');
+    renderDeck();
+  }
+  function onDepClick(i) {
+    var s = st();
+    var lv = scene.deployLevel ? scene.deployLevel() : 3;
+    if (s.mode !== 'manual') { S.toast('自动模式下由 Controller 按决策矩阵部署，可切换为手动模式亲自操作'); return; }
+    if (i === 1 && lv < 1) {
+      if (s.stage < 2) { S.toast('请先运行到 03 存储决策，查看全局评估依据'); return; }
+      doDeploy(1);
+    } else if (i === 2 && lv >= 1 && lv < 2) {
+      if (s.stage < 5) { S.toast('T2 由跨机架共享需求驱动，在 06 迁移复制阶段部署'); return; }
+      doDeploy(2);
+    } else if (i <= lv) {
+      S.toast('T' + i + ' 已完成部署');
+    } else {
+      S.toast('请按顺序先完成前置部署');
+    }
+  }
+  function doDeploy(i) {
+    scene.setDeployLevel(i, true);
+    if (i === 2) {
+      setTimeout(function () { if (scene.deployLevel() === 2) scene.setDeployLevel(3, true); }, 1900);
+    }
+    pushLog('手动部署执行 → T' + i);
+    scheduleNext();
+  }
+  function scheduleNext() {
+    var s = st();
+    if (!s.playing) return;
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      if (!st().playing) return;
+      if (st().stage >= F.STAGES.length - 1) { pause(); pushLog('本轮演示完成 · 可切换场景重放'); renderDeck(); return; }
+      go(st().stage + 1);
+    }, 4600);
   }
   function kpi(k, v) { return '<div class="fl-kpi"><span>' + k + '</span><b>' + esc(v) + '</b></div>'; }
 
@@ -246,12 +326,15 @@ window.__RENDER_FLOW__ = (function () {
     if (window.__SIM__ && S.log) { try { S.log('[FLOW ' + sg.n + '] ' + sg.zh); } catch (e) {} }
     renderLeft(); renderRight(); renderDeck();
     if (s.playing) {
-      clearTimeout(timer);
-      timer = setTimeout(function () {
-        if (!st().playing) return;
-        if (st().stage >= F.STAGES.length - 1) { pause(); pushLog('本轮演示完成 · 可切换场景重放'); renderDeck(); return; }
-        go(st().stage + 1);
-      }, 4600);
+      var lv = scene.deployLevel ? scene.deployLevel() : 3;
+      var block = s.mode === 'manual' &&
+        ((sg.id === 'decide' && lv < 1) || (sg.id === 'migrate' && lv < 2));
+      if (block) {
+        pushLog('手动模式：请在底部部署时间轴点击 ' + (sg.id === 'decide' ? 'T1' : 'T2') + ' 执行增量部署后继续');
+        renderDeck();
+      } else {
+        scheduleNext();
+      }
     }
   }
   function play() {
@@ -290,6 +373,7 @@ window.__RENDER_FLOW__ = (function () {
       if (idx >= 0) st().stage = idx;
       var sid = p.get('flowsc');
       if (sid) st().scenario = sid;
+      if (p.get('mode') === 'manual') st().mode = 'manual';
       if (p.get('play') === '1') st().playing = true;
     } catch (e) {}
   }
@@ -297,6 +381,7 @@ window.__RENDER_FLOW__ = (function () {
   function renderAll() {
     ensureDom();
     initFromUrl();
+    if (scene.setAutoDeploy) scene.setAutoDeploy(st().mode !== 'manual');
     renderLeft(); renderRight(); renderDeck();
     playStage(stage(), sc());
     if (st().playing) play();

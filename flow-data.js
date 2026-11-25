@@ -74,10 +74,10 @@ window.FLOW = (function () {
     },
     {
       id: 'decide', n: '03', zh: '存储决策', en: 'PLACEMENT',
-      caption: 'Controller 判定：R1 访问集中且无本地共享内存 → 触发 T1 增量部署 CXL',
-      act: 'Placement Controller 逐项评估：访问局部性 {local}%、机架余量、部署成本；判定 R1 值得增量部署 CXL',
-      obj: '部署决策 · R1 ← CXL Switch + Shared MHD-1 · N1/N2 接入',
-      why: '访问集中（{local}%）+ 部署成本低 + 收益可预期：增量部署优于维持全 RDMA',
+      caption: 'Controller 综合全网拓扑 / 历史热度 / 拥塞 / 利用率 / 成本 全局评估 → 触发 T1',
+      act: 'Placement Controller 汇总四机架画像：访问局部性、历史 KV 热度、RDMA 链路拥塞、拓扑利用率、部署成本，加权评分后排定部署优先级',
+      obj: '全局决策矩阵 · R1-R4 评分排序 · R1 ← CXL Switch + MHD-1 · N1/N2 接入',
+      why: '决策不是单看某一个机架：R1 局部性 {local}% 且评分最高；R3 受 Spine 拥塞 86% 驱动列为 T2；R2/R4 收益低于成本暂不部署',
       res: 'T1 执行：R1 出现 CXL Switch 与共享 MHD-1，N1/N2 接入共享内存池；{kv} 写入 MHD-1',
       metrics: { 延迟: '—', 链路: '{load}', 占用: '{occ}' },
       anim: { type: 'decide' }
@@ -136,6 +136,25 @@ window.FLOW = (function () {
   ];
   var START_LEVEL = [0, 0, 0, 1, 1, 1, 3];
 
+  /* ── 全局部署决策矩阵（阶段 03 呈现）──
+   * Controller 不只看单个机架，而是综合全网证据加权评分：
+   * 局部性（访问集中在谁家）· 历史热度（KV 访问统计）· 拥塞（RDMA 链路压力）
+   * 利用率（拓扑负载）· 成本（增量部署回收周期）。
+   * 数值为教学示意，非实测。 */
+  var DEPLOY_DECISION = {
+    note: '综合评分 = 局部性 · 历史热度 · 拥塞收益 · 利用率 · 部署成本 加权（示意，非实测）',
+    racks: [
+      { id: 'R1', locality: 70, hot: 82, cong: 71, util: 63, cost: '低', score: 86,
+        pick: 'T1 · 首批部署', why: '访问集中 70% 却全部压在 RDMA 远端路径，本地化收益最大、回收周期最短' },
+      { id: 'R3', locality: 42, hot: 76, cong: 86, util: 48, cost: '低', score: 64,
+        pick: 'T2 · 次批部署', why: '跨机架共享热度高，Spine 链路拥塞 86%，随共享需求增长列入次批' },
+      { id: 'R2', locality: 18, hot: 35, cong: 33, util: 22, cost: '低', score: 31,
+        pick: '暂不部署', why: '访问稀疏、热度低，RDMA 远端池已够用，部署闲置率高' },
+      { id: 'R4', locality: 12, hot: 22, cong: 29, util: 18, cost: '中', score: 26,
+        pick: '暂不部署', why: '无跨机架共享需求，增量成本回收周期长，维持存量架构' }
+    ]
+  };
+
   /* ── 图例（与需求文档统一视觉编码一致） ── */
   var LEGEND = [
     { k: 'kv',   c: '#e6a056', t: 'KV Block（橙色方块）' },
@@ -162,5 +181,5 @@ window.FLOW = (function () {
   }
 
   return { RACKS: RACKS, SCENARIOS: SCENARIOS, STAGES: STAGES, DEP: DEP, START_LEVEL: START_LEVEL,
-           LEGEND: LEGEND, pick: pick, stage: stage, fill: fill };
+           DEPLOY_DECISION: DEPLOY_DECISION, LEGEND: LEGEND, pick: pick, stage: stage, fill: fill };
 })();
