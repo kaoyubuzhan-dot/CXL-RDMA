@@ -125,7 +125,7 @@ window.FLOW_SCENE = (function () {
     var f = L.fabric, g = el('g', { class: 'node-fabric', 'data-pick': 'FABRIC' }, root.boxes);
     el('rect', { x: f.x, y: f.y, width: f.w, height: f.h, rx: 2, class: 'fx-bar' }, g);
     for (var i = 0; i < 16; i++) {
-      el('rect', { x: f.x + 300 + i * 46, y: f.y + 16, width: 30, height: 10, rx: 1.5, class: 'fx-chip' }, g);
+      el('rect', { x: f.x + 300 + i * 33, y: f.y + 16, width: 24, height: 10, rx: 1.5, class: 'fx-chip' }, g);
     }
     txt('LEAF–SPINE  FABRIC', { x: f.x + 20, y: f.y + 26, class: 'fx-t1' }, g);
     txt('ROCE V2 · 400G · ECMP · 无阻塞交换', { x: f.x + 20, y: f.y + 38, class: 'fx-t3' }, g);
@@ -220,7 +220,7 @@ window.FLOW_SCENE = (function () {
             class: 'fx-link fx-link--cxl'
           }, g);
         });
-        txt('CXL SWITCH · 2 HOST PORT', { x: x + NODE_X, y: MHD_Y[1] + MHD_H + 22, class: 'fx-t4' }, g);
+        txt('CXL SW · 2 HOST PORT', { x: x + NODE_X, y: MHD_Y[1] + MHD_H + 22, class: 'fx-t4' }, g);
       }
 
       el('circle', { cx: x + L.rack.w / 2, cy: L.rack.y - 4, r: 2.4, class: 'fx-dot fx-dot--rdma' }, g);
@@ -399,15 +399,16 @@ window.FLOW_SCENE = (function () {
   }
 
   function callout(x, y, title, sub, color) {
-    x = Math.max(20, Math.min(W - 172, x));
+    var CW = 196;
+    x = Math.max(20, Math.min(W - CW - 20, x));
     y = Math.max(80, Math.min(H - 60, y));
     var g = el('g', { class: 'fx-callout' }, root.tags);
-    el('rect', { x: x, y: y, width: 152, height: sub ? 34 : 22, rx: 2, class: 'fx-callout-box' }, g);
-    el('rect', { x: x, y: y, width: 2, height: sub ? 34 : 22, fill: color || '#7dc9df' }, g);
-    var t = el('text', { x: x + 9, y: y + 15, class: 'fx-callout-t' }, g);
+    el('rect', { x: x, y: y, width: CW, height: sub ? 40 : 26, rx: 2, class: 'fx-callout-box' }, g);
+    el('rect', { x: x, y: y, width: 2, height: sub ? 40 : 26, fill: color || '#7dc9df' }, g);
+    var t = el('text', { x: x + 10, y: y + 18, class: 'fx-callout-t' }, g);
     t.textContent = title;
     if (sub) {
-      var s = el('text', { x: x + 9, y: y + 27, class: 'fx-t4' }, g);
+      var s = el('text', { x: x + 10, y: y + 34, class: 'fx-t4' }, g);
       s.textContent = sub;
     }
     g.setAttribute('opacity', '0');
