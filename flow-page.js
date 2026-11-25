@@ -38,8 +38,26 @@ window.__RENDER_FLOW__ = (function () {
     ui.deck.id = 'flow-deck';
     hostEl.appendChild(ui.deck);
 
-    scene.mount(ui.host, { onSelect: onPick });
+    scene.mount(ui.host, { onSelect: onPick, onDeploy: onDeployLv });
     mounted = true;
+  }
+
+  /* ── 部署等级变化（T0→T3）：只刷新部署时间轴，不打断动画 ── */
+  function onDeployLv(lv) {
+    syncDepStrip(lv);
+    var d = F.DEP && F.DEP[lv];
+    if (d) pushLog('部署时间轴 → ' + d.id + ' ' + d.zh + ' · ' + d.brief);
+  }
+  function syncDepStrip(lv) {
+    var strip = document.getElementById('fl-dep-strip');
+    if (!strip) return;
+    strip.querySelectorAll('[data-dep]').forEach(function (n) {
+      var i = +n.getAttribute('data-dep');
+      n.classList.toggle('is-done', lv > i);
+      n.classList.toggle('is-cur', lv === i);
+    });
+    var cnt = strip.querySelector('.fl-dep-cnt');
+    if (cnt) cnt.textContent = (lv >= 2 ? 2 : lv) + ' / 4 机架';
   }
 
   function onPick(id) {
@@ -166,6 +184,18 @@ window.__RENDER_FLOW__ = (function () {
         '<i></i><span>' + x.n + '</span><em>' + x.zh + '</em></button>';
     });
     h += '</div>';
+    h += '</div>';
+
+    /* 并行时间轴：CXL 增量部署（T0→T3，与上方 KV 生命周期对齐） */
+    var lv = scene.deployLevel ? scene.deployLevel() : 3;
+    h += '<div class="fl-dep" id="fl-dep-strip">';
+    h += '<span class="fl-dep-h">CXL 增量部署</span><span class="fl-dep-cnt">' + (lv >= 2 ? 2 : lv) + ' / 4 机架</span>';
+    h += F.DEP.map(function (d, i) {
+      var cls = lv > i ? 'is-done' : lv === i ? 'is-cur' : '';
+      return '<div class="fl-dep-t ' + cls + '" data-dep="' + i + '" title="' + esc(d.brief) + '">' +
+        '<b>' + d.id + '</b><span>' + esc(d.zh) + '</span></div>' +
+        (i < F.DEP.length - 1 ? '<i class="fl-dep-line"></i>' : '');
+    }).join('');
     h += '</div>';
 
     h += '<div class="fl-deck-bot">' +

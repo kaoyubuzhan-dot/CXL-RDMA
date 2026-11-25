@@ -36,6 +36,8 @@ window.FLOW_SCENE = (function () {
   var svg = null, host = null, root = {}, onSelect = null;
   var actors = [], raf = null, t0 = 0, timers = [];
   var curSc = null;
+  /* CXL 增量部署等级：0=T0 全RDMA · 1=T1 R1部署 · 2=T2 R3部署 · 3=T3 重分配 */
+  var deployLv = -1, onDeployCb = null;
 
   function later(fn, ms) { var id = setTimeout(fn, ms); timers.push(id); return id; }
 
@@ -160,68 +162,17 @@ window.FLOW_SCENE = (function () {
       el('rect', { x: x, y: L.rack.y, width: L.rack.w, height: L.rack.h, rx: 2, class: 'fx-rack' }, g);
       el('rect', { x: x, y: L.rack.y, width: L.rack.w, height: 36, rx: 2, class: 'fx-rack-hd' }, g);
       txt(rk.id, { x: x + 12, y: L.rack.y + 24, class: 'fx-rack-id' }, g);
-      txt(rk.tag, { x: x + L.rack.w - 12, y: L.rack.y + 24, class: 'fx-t3', 'text-anchor': 'end' }, g);
+      var tag = txt(rk.tag, { x: x + L.rack.w - 12, y: L.rack.y + 24, class: 'fx-t3 fx-rack-tag', 'text-anchor': 'end' }, g);
 
       rk.nodes.forEach(function (nd, ni) {
         var ny = nodeY(ni);
-        var ng = el('g', { class: 'node' + (nd.cxl ? ' node--cxl' : ''), 'data-pick': rk.id + '-' + nd.id }, g);
+        var ng = el('g', { class: 'node', 'data-pick': rk.id + '-' + nd.id }, g);
         el('rect', { x: x + NODE_X, y: ny, width: NODE_W, height: NODE_H, rx: 2, class: 'fx-node' }, ng);
         txt(nd.id, { x: x + NODE_X + 9, y: ny + 23, class: 'fx-node-id' }, ng);
         txt(nd.role, { x: x + NODE_X + 9, y: ny + 40, class: 'fx-t3' }, ng);
-        if (nd.cxl) {
-          el('rect', { x: x + NODE_X + 84, y: ny + 11, width: 32, height: 14, rx: 1, class: 'fx-pill fx-pill--cxl' }, ng);
-          txt('CXL', { x: x + NODE_X + 100, y: ny + 21, class: 'fx-pill-t', 'text-anchor': 'middle' }, ng);
-        }
         el('rect', { x: x + NODE_X + 84, y: ny + 31, width: 40, height: 18, rx: 1, class: 'fx-hbm', 'data-slot': rk.id + '-' + nd.id }, ng);
         txt('HBM', { x: x + NODE_X + 104, y: ny + 44, class: 'fx-t4', 'text-anchor': 'middle' }, ng);
       });
-
-      if (rk.mhd.length) {
-        rk.mhd.forEach(function (mh, mi) {
-          var my = MHD_Y[mi];
-          var mg = el('g', { class: 'mhd', 'data-pick': rk.id + '-' + mh.id }, g);
-          el('rect', { x: x + NODE_X, y: my, width: NODE_W, height: MHD_H, rx: 2, class: 'fx-mhd' }, mg);
-          txt(mh.id, { x: x + NODE_X + 9, y: my + 20, class: 'fx-mhd-id' }, mg);
-          txt(mh.used + ' / ' + mh.cap + ' GB', { x: x + NODE_X + 9, y: my + 36, class: 'fx-t3' }, mg);
-          el('rect', { x: x + NODE_X + 9, y: my + 48, width: 114, height: 5, rx: 2, class: 'fx-bar-bg' }, mg);
-          el('rect', {
-            x: x + NODE_X + 9, y: my + 48, width: 114 * (mh.used / mh.cap), height: 5, rx: 2,
-            class: 'fx-bar-fill', 'data-bar': rk.id + '-' + mh.id
-          }, mg);
-          txt('MHD', { x: x + NODE_X + NODE_W - 9, y: my + 20, class: 'fx-t4', 'text-anchor': 'end' }, mg);
-        });
-      } else {
-        var ph = el('g', { class: 'mhd mhd--empty' }, g);
-        el('rect', { x: x + NODE_X, y: MHD_Y[0], width: NODE_W, height: MHD_H * 2 + 8, rx: 2, class: 'fx-mhd-empty' }, ph);
-        txt('NO CXL DEVICE', { x: x + NODE_X + NODE_W / 2, y: MHD_Y[0] + MHD_H - 6, class: 'fx-t4', 'text-anchor': 'middle' }, ph);
-        txt('纯 RDMA 访问路径', { x: x + NODE_X + NODE_W / 2, y: MHD_Y[0] + MHD_H + 14, class: 'fx-t4', 'text-anchor': 'middle' }, ph);
-      }
-
-      if (rk.cxl) {
-        var busX = busXOf(ri);
-        el('path', {
-          d: 'M' + busX + ',' + (nodeY(0) + NODE_H / 2) + ' L' + busX + ',' + (MHD_Y[1] + MHD_H / 2),
-          class: 'fx-bus fx-bus--cxl'
-        }, g);
-        rk.nodes.forEach(function (nd, ni) {
-          if (!nd.cxl) return;
-          var ny = nodeY(ni) + NODE_H / 2;
-          el('path', {
-            id: 'lnk-cxl-' + rk.id + '-' + nd.id,
-            d: 'M' + (x + NODE_X + NODE_W) + ',' + ny + ' L' + busX + ',' + ny,
-            class: 'fx-link fx-link--cxl'
-          }, g);
-        });
-        rk.mhd.forEach(function (mh, mi) {
-          var my = MHD_Y[mi] + MHD_H / 2;
-          el('path', {
-            id: 'lnk-cxl-' + rk.id + '-' + mh.id,
-            d: 'M' + busX + ',' + my + ' L' + (x + NODE_X + NODE_W) + ',' + my,
-            class: 'fx-link fx-link--cxl'
-          }, g);
-        });
-        txt('CXL SW · 2 HOST PORT', { x: x + NODE_X, y: MHD_Y[1] + MHD_H + 22, class: 'fx-t4' }, g);
-      }
 
       el('circle', { cx: x + L.rack.w / 2, cy: L.rack.y - 4, r: 2.4, class: 'fx-dot fx-dot--rdma' }, g);
       el('rect', {
@@ -229,9 +180,94 @@ window.FLOW_SCENE = (function () {
         class: 'fx-rank', 'data-ring': rk.id
       }, root.hl);
 
-      root.racks[rk.id] = g;
+      root.racks[rk.id] = { g: g, tag: tag, hw: null };
     });
   }
+
+  /* ── 按部署等级重建某机架的 CXL 硬件（Switch / MHD / 主机接入 / CXL 总线） ── */
+  function applyHardware(rk, ri, lv, animate) {
+    var slot = root.racks[rk.id];
+    if (!slot) return;
+    if (slot.hw && slot.hw.parentNode) slot.hw.parentNode.removeChild(slot.hw);
+    var x = rackX(ri);
+    var g = el('g', { class: 'fx-hw' + (animate ? ' fx-grow' : '') }, slot.g);
+    var deployed = (rk.id === 'R1' && lv >= 1) || (rk.id === 'R3' && lv >= 2);
+    var cxlOn = deployed;
+    var isR1 = rk.id === 'R1';
+
+    if (!cxlOn) {
+      var ph = el('g', { class: 'mhd mhd--empty' }, g);
+      el('rect', { x: x + NODE_X, y: MHD_Y[0], width: NODE_W, height: MHD_H * 2 + 8, rx: 2, class: 'fx-mhd-empty' }, ph);
+      txt('NO CXL DEVICE', { x: x + NODE_X + NODE_W / 2, y: MHD_Y[0] + MHD_H - 6, class: 'fx-t4', 'text-anchor': 'middle' }, ph);
+      txt('纯 RDMA 访问路径', { x: x + NODE_X + NODE_W / 2, y: MHD_Y[0] + MHD_H + 14, class: 'fx-t4', 'text-anchor': 'middle' }, ph);
+    } else {
+      /* T1/T2 增量上线：先挂一台 MHD，另一槽位虚线预留 */
+      var mh = rk.mhd[0];
+      var my = MHD_Y[0];
+      var mg = el('g', { class: 'mhd', 'data-pick': rk.id + '-' + mh.id }, g);
+      el('rect', { x: x + NODE_X, y: my, width: NODE_W, height: MHD_H, rx: 2, class: 'fx-mhd' }, mg);
+      txt(mh.id, { x: x + NODE_X + 9, y: my + 20, class: 'fx-mhd-id' }, mg);
+      txt(mh.used + ' / ' + mh.cap + ' GB', { x: x + NODE_X + 9, y: my + 36, class: 'fx-t3' }, mg);
+      el('rect', { x: x + NODE_X + 9, y: my + 48, width: 114, height: 5, rx: 2, class: 'fx-bar-bg' }, mg);
+      el('rect', {
+        x: x + NODE_X + 9, y: my + 48, width: 114 * (mh.used / mh.cap), height: 5, rx: 2,
+        class: 'fx-bar-fill', 'data-bar': rk.id + '-' + mh.id
+      }, mg);
+      txt('MHD', { x: x + NODE_X + NODE_W - 9, y: my + 20, class: 'fx-t4', 'text-anchor': 'end' }, mg);
+      var rs = el('g', { class: 'mhd mhd--empty' }, g);
+      el('rect', { x: x + NODE_X, y: MHD_Y[1], width: NODE_W, height: MHD_H, rx: 2, class: 'fx-mhd-empty' }, rs);
+      txt('RESERVED', { x: x + NODE_X + NODE_W / 2, y: MHD_Y[1] + MHD_H / 2 + 4, class: 'fx-t4', 'text-anchor': 'middle' }, rs);
+
+      /* CXL 总线 + 主机接入链路（N1/N2）+ MHD 链路 */
+      var busX = busXOf(ri);
+      el('path', {
+        d: 'M' + busX + ',' + (nodeY(0) + NODE_H / 2) + ' L' + busX + ',' + (MHD_Y[1] + MHD_H / 2),
+        class: 'fx-bus fx-bus--cxl'
+      }, g);
+      ['N1', 'N2'].forEach(function (nid, ni) {
+        var ny = nodeY(ni) + NODE_H / 2;
+        el('path', {
+          id: 'lnk-cxl-' + rk.id + '-' + nid,
+          d: 'M' + (x + NODE_X + NODE_W) + ',' + ny + ' L' + busX + ',' + ny,
+          class: 'fx-link fx-link--cxl'
+        }, g);
+      });
+      el('path', {
+        id: 'lnk-cxl-' + rk.id + '-' + mh.id,
+        d: 'M' + busX + ',' + (my + MHD_H / 2) + ' L' + (x + NODE_X + NODE_W) + ',' + (my + MHD_H / 2),
+        class: 'fx-link fx-link--cxl'
+      }, g);
+
+      /* 主机接入 CXL 徽标 */
+      [0, 1].forEach(function (ni) {
+        var ny = nodeY(ni);
+        el('rect', { x: x + NODE_X + 84, y: ny + 11, width: 32, height: 14, rx: 1, class: 'fx-pill fx-pill--cxl' }, g);
+        txt('CXL', { x: x + NODE_X + 100, y: ny + 21, class: 'fx-pill-t', 'text-anchor': 'middle' }, g);
+      });
+      txt('CXL SW · 2 HOST PORT', { x: x + NODE_X, y: MHD_Y[1] + MHD_H + 22, class: 'fx-t4' }, g);
+    }
+    slot.hw = g;
+    if (slot.tag) {
+      slot.tag.textContent = cxlOn ? 'CXL + RDMA' : 'RDMA ONLY';
+      slot.tag.style.fill = cxlOn ? '' : 'rgba(167,197,215,.4)';
+    }
+  }
+
+  /* ── 部署等级切换：animate=true 时设备"长出来" ── */
+  function setDeployLevel(lv, animate) {
+    lv = Math.max(0, Math.min(3, lv));
+    if (lv === deployLv && !animate) return;
+    deployLv = lv;
+    FLOW.RACKS.forEach(function (rk, ri) { applyHardware(rk, ri, lv, animate); });
+    if (animate) {
+      /* T1 不出卡：决策阶段已有 R1/MHD-1 候选标注卡，避免同位叠卡；
+         设备生长动画 + 底部部署时间轴 + 日志已完整表达 T1 事件 */
+      if (lv === 2) callout(rackX(2) + 4, 78, 'T2 · Rack 3 部署 CXL', null, '#53e3c4');
+      else if (lv === 3) callout(rackX(0) + 4, 78, 'T3 · KV 重分配完成', null, '#a38bf2');
+    }
+    if (onDeployCb) { try { onDeployCb(lv); } catch (e) {} }
+  }
+  function deployLevel() { return Math.max(0, deployLv); }
 
   function drawPool() {
     var p = L.pool;
@@ -584,6 +620,18 @@ window.FLOW_SCENE = (function () {
   function play(stage, sc) {
     clear();
     curSc = sc;
+    var idx = parseInt(stage.n, 10) - 1;
+    if (isNaN(idx) || idx < 0) idx = 0;
+    /* 部署等级对齐阶段起点（后退/跳转时同步降级或升级，不播动画） */
+    var startLv = (FLOW.START_LEVEL && FLOW.START_LEVEL[idx] !== undefined) ? FLOW.START_LEVEL[idx] : 3;
+    if (deployLv !== startLv) setDeployLevel(startLv, false);
+    /* 阶段内增量部署动画：T1 在 03 存储决策触发，T2/T3 在 06 迁移复制触发 */
+    if (stage.id === 'decide') {
+      later(function () { if (deployLv < 1) setDeployLevel(1, true); }, 1400);
+    } else if (stage.id === 'migrate') {
+      later(function () { if (deployLv < 2) setDeployLevel(2, true); }, 1500);
+      later(function () { if (deployLv < 3) setDeployLevel(3, true); }, 3300);
+    }
     var fn = ANIMS[stage.anim.type];
     if (fn) {
       try { fn(sc, stage); } catch (e) { if (window.console) console.warn('[flow] anim error', e); }
@@ -593,7 +641,9 @@ window.FLOW_SCENE = (function () {
   function mount(h, opts) {
     host = h;
     onSelect = (opts && opts.onSelect) || null;
+    onDeployCb = (opts && opts.onDeploy) || null;
     build();
+    setDeployLevel(0, false);
   }
 
   function select(id) {
@@ -609,6 +659,7 @@ window.FLOW_SCENE = (function () {
 
   return {
     mount: mount, play: play, clear: clear, select: select,
-    rackIdxOf: rackIdxOf, nodeAnchor: nodeAnchor, mhdAnchor: mhdAnchor
+    rackIdxOf: rackIdxOf, nodeAnchor: nodeAnchor, mhdAnchor: mhdAnchor,
+    setDeployLevel: setDeployLevel, deployLevel: deployLevel
   };
 })();

@@ -64,21 +64,21 @@ window.FLOW = (function () {
     },
     {
       id: 'collect', n: '02', zh: '信息采集', en: 'TELEMETRY',
-      caption: 'Runtime Agent · RNIC · Leaf-Spine · Topology Monitor 分别上报统计，汇总至 Controller',
+      caption: 'T0 基线画像：全 RDMA 架构下，跨机架访问占大头 · 热度与局部性上报 Controller',
       act: '五类来源并行上报：KV 访问计数与热度、访问主体来源机架、KV 大小、RDMA 链路负载、节点与 CXL 连接关系',
-      obj: '{kv} 元数据 · RNIC 遥测 · Topology Monitor',
-      why: '存储决策需要热度、访问局部性、容量与 CXL 可达性四类依据',
-      res: 'Controller 收到汇总画像（仅元数据，KV 本体不搬运）：热度 {hot}，本地访问 {local}%',
+      obj: '{kv} 元数据 · RNIC 遥测 · Topology Monitor · T0 基线指标',
+      why: '存储决策需要热度、访问局部性、容量与 CXL 可达性四类依据；T0 阶段集群没有任何 CXL 设备',
+      res: '基线结论：访问主体集中在生产机架（{local}%），但只能走 RDMA 远端路径，平均延迟 4.1 µs',
       metrics: { 延迟: '—', 链路: '{load}', 占用: '{occ}' },
       anim: { type: 'collect' }
     },
     {
       id: 'decide', n: '03', zh: '存储决策', en: 'PLACEMENT',
-      caption: 'Placement Controller 比较候选位置：本地 MHD / 远端 MHD / RDMA 池 → 选定 {dst}',
-      act: 'Workload Profiler 算出访问主体集中在生产机架（{local}%），Placement Controller 逐项比较候选存储位置',
-      obj: '{kv} · 候选：R1-MHD-1 / R3-MHD-3 / RDMA Pool',
-      why: '本地访问占比 {local}%、目标机架 MHD 尚有余量、相关节点具备 CXL 接入条件',
-      res: '选定 {dst} 作为目标位置，Directory 写入「逻辑 ID → 物理位置」映射',
+      caption: 'Controller 判定：R1 访问集中且无本地共享内存 → 触发 T1 增量部署 CXL',
+      act: 'Placement Controller 逐项评估：访问局部性 {local}%、机架余量、部署成本；判定 R1 值得增量部署 CXL',
+      obj: '部署决策 · R1 ← CXL Switch + Shared MHD-1 · N1/N2 接入',
+      why: '访问集中（{local}%）+ 部署成本低 + 收益可预期：增量部署优于维持全 RDMA',
+      res: 'T1 执行：R1 出现 CXL Switch 与共享 MHD-1，N1/N2 接入共享内存池；{kv} 写入 MHD-1',
       metrics: { 延迟: '—', 链路: '{load}', 占用: '{occ}' },
       anim: { type: 'decide' }
     },
@@ -94,21 +94,21 @@ window.FLOW = (function () {
     },
     {
       id: 'access', n: '05', zh: '数据访问', en: 'DATA ACCESS',
-      caption: '本地访问走 CXL 链路（青绿），跨机架访问走 Leaf-Spine RDMA（蓝），两条路径分别点亮',
-      act: '本地：同机架节点经 CXL 从 {dst} 读取 KV；远端：另一机架经 Leaf-Spine 跨机架访问同一份数据',
-      obj: '{kv} · CXL 链路 · RDMA 链路',
-      why: '本地 CXL 命中可省掉跨机架往返；远端访问必须经过 ToR → Spine → ToR',
-      res: 'KV Block 回填 GPU HBM，链路负载与访问延迟更新（本地 {delay}）',
+      caption: '增量部署收益可见：本地 CXL 命中 0.9 µs，对比 T0 基线 RDMA 4.1 µs',
+      act: '本地：同机架节点经 CXL 从 {dst} 读取 KV；远端：另一机架仍必须走 Leaf-Spine 跨机架 RDMA',
+      obj: '{kv} · CXL 链路（T1 新增） · RDMA 链路（存量）',
+      why: 'T1 部署后本地访问可省掉跨机架往返：0.9 µs vs 基线 4.1 µs，这就是增量部署的直接收益',
+      res: 'KV Block 回填 GPU HBM；跨机架访问仍走 RDMA —— 由此引出 T2：R3 也需要部署 CXL',
       metrics: { 延迟: '{delay}', 链路: '{load}', 占用: '{occ}' },
       anim: { type: 'access' }
     },
     {
       id: 'migrate', n: '06', zh: '迁移复制', en: 'MIGRATE / COPY',
-      caption: '迁移 = 原件移动并释放旧位置；复制 = 原件保留、新增紫色副本',
-      act: 'A. 迁移：{kv} 从旧位置搬向 {dst}；B. 复制：高频 KV 在目标机架生成副本',
-      obj: '{kv}（原件）· 新副本 · Directory 版本',
+      caption: 'T2：R3 依据跨机架共享需求部署 CXL → T3：热点 KV 迁入 MHD、共享 KV 生成副本',
+      act: 'A. 迁移：{kv} 从旧位置搬向 {dst}；B. 复制：多机架共享的高频 KV 在对端生成副本',
+      obj: '{kv}（原件）· 新副本 · Directory 版本 · T2 新部署的 R3-MHD',
       why: '访问主体迁移时迁移更省容量；多机架共享时复制能避免跨机架往返',
-      res: 'Directory 版本升至 {ver}，新增副本记录 {replica}，旧位置释放空间',
+      res: 'T3 完成：热点 KV 迁入 MHD、副本落位，MHD 利用率升至 63%，Directory 版本升至 {ver}',
       metrics: { 延迟: '{delay}', 链路: '{load}', 占用: '{occ}' },
       anim: { type: 'migrate' }
     },
@@ -123,6 +123,18 @@ window.FLOW = (function () {
       anim: { type: 'evict' }
     }
   ];
+
+  /* ── CXL 增量部署事件时间轴（与 KV 生命周期并行）──
+   * T0 全 RDMA 基线 → T1 Rack1 部署 → T2 Rack3 部署 → T3 KV 重分配
+   * START_LEVEL[i] = 第 i 个生命周期阶段开始时的部署等级（0-3），
+   * 场景据此同步硬件状态；T1 在阶段 03 内动画触发，T2/T3 在阶段 06 内触发。 */
+  var DEP = [
+    { id: 'T0', zh: '全 RDMA 基线', brief: '0 / 4 CXL 机架 · 仅存量 RDMA + 远端内存池' },
+    { id: 'T1', zh: 'Rack 1 部署 CXL', brief: '1 / 4 · CXL Switch + MHD-1 · N1/N2 接入' },
+    { id: 'T2', zh: 'Rack 3 部署 CXL', brief: '2 / 4 · 跨机架共享需求驱动' },
+    { id: 'T3', zh: 'KV 重分配', brief: '热点迁入 MHD · 共享 KV 生成副本 · 利用率 63%' }
+  ];
+  var START_LEVEL = [0, 0, 0, 1, 1, 1, 3];
 
   /* ── 图例（与需求文档统一视觉编码一致） ── */
   var LEGEND = [
@@ -149,6 +161,6 @@ window.FLOW = (function () {
     });
   }
 
-  return { RACKS: RACKS, SCENARIOS: SCENARIOS, STAGES: STAGES, LEGEND: LEGEND,
-           pick: pick, stage: stage, fill: fill };
+  return { RACKS: RACKS, SCENARIOS: SCENARIOS, STAGES: STAGES, DEP: DEP, START_LEVEL: START_LEVEL,
+           LEGEND: LEGEND, pick: pick, stage: stage, fill: fill };
 })();

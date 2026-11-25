@@ -128,6 +128,30 @@
 .fl-log{flex:0 1 auto;max-width:24%;font-family:var(--mono);font-size:8px;letter-spacing:.04em;
   color:var(--deep);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
+/* ── 并行时间轴：CXL 增量部署（与 KV 生命周期并行） ── */
+.fl-dep{display:flex;align-items:center;gap:8px;margin-top:6px;padding-top:6px;
+  border-top:1px dashed rgba(167,197,215,.14)}
+.fl-dep-h{font-family:var(--mono);font-size:8px;letter-spacing:.14em;color:var(--cxl);white-space:nowrap}
+.fl-dep-cnt{font-family:var(--mono);font-size:8px;color:var(--deep);white-space:nowrap}
+.fl-dep-t{display:flex;align-items:baseline;gap:6px;padding:3px 8px;border:1px solid rgba(167,197,215,.16);
+  background:rgba(8,14,19,.45);opacity:.5;transition:.3s;white-space:nowrap}
+.fl-dep-t b{font-family:var(--mono);font-size:9px;color:var(--soft)}
+.fl-dep-t span{font-family:var(--cn);font-size:10px;color:var(--soft)}
+.fl-dep-t.is-done{opacity:.85;border-color:rgba(var(--cxl-rgb),.4)}
+.fl-dep-t.is-done b{color:var(--cxl)}
+.fl-dep-t.is-cur{opacity:1;border-color:rgba(var(--cxl-rgb),.85);
+  background:rgba(var(--cxl-rgb),.1);box-shadow:0 0 10px rgba(var(--cxl-rgb),.22)}
+.fl-dep-t.is-cur b{color:var(--cxl)}
+.fl-dep-line{flex:0 0 14px;height:1px;background:rgba(167,197,215,.22)}
+
+/* ── 增量部署"长出来"动画 ── */
+.fx-grow{animation:fx-grow .8s cubic-bezier(.2,.85,.3,1.05) both}
+@keyframes fx-grow{
+  from{opacity:0;transform:scale(.82) translateY(10px)}
+  to{opacity:1;transform:scale(1) translateY(0)}
+}
+.fx-hw{transform-box:fill-box;transform-origin:center}
+
 /* ============================================================
  * 3. 左栏：场景 + 七阶段流程
  * ============================================================ */
