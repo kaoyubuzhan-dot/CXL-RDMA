@@ -193,7 +193,7 @@ window.FLOW_SCENE = (function () {
     if (slot.hw && slot.hw.parentNode) slot.hw.parentNode.removeChild(slot.hw);
     var x = rackX(ri);
     var g = el('g', { class: 'fx-hw' + (animate ? ' fx-grow' : '') }, slot.g);
-    var deployed = (rk.id === 'R1' && lv >= 1) || (rk.id === 'R3' && lv >= 2);
+    var deployed = (rk.id === 'R1' || rk.id === 'R3') && lv >= 1;
     var cxlOn = deployed;
     var isR1 = rk.id === 'R1';
 
@@ -255,18 +255,15 @@ window.FLOW_SCENE = (function () {
     }
   }
 
-  /* ── 部署等级切换：animate=true 时设备"长出来" ── */
+  /* ── 部署等级切换：animate=true 时设备"长出来" ──
+     等级 1 = R1+R3 同批部署（决策矩阵一次判定，无分批时间差）。
+     不单独出标注卡：决策阶段已有"选中"标注卡，避免同位叠卡；
+     设备生长动画 + 底部部署时间轴 + 日志已完整表达 T1 事件。 */
   function setDeployLevel(lv, animate) {
-    lv = Math.max(0, Math.min(3, lv));
+    lv = Math.max(0, Math.min(1, lv));
     if (lv === deployLv && !animate) return;
     deployLv = lv;
     FLOW.RACKS.forEach(function (rk, ri) { applyHardware(rk, ri, lv, animate); });
-    if (animate) {
-      /* T1 不出卡：决策阶段已有 R1/MHD-1 候选标注卡，避免同位叠卡；
-         设备生长动画 + 底部部署时间轴 + 日志已完整表达 T1 事件 */
-      if (lv === 2) callout(rackX(2) + 4, 78, 'T2 · Rack 3 部署 CXL', null, '#53e3c4');
-      else if (lv === 3) callout(rackX(0) + 4, 78, 'T3 · KV 重分配完成', null, '#a38bf2');
-    }
     if (onDeployCb) { try { onDeployCb(lv); } catch (e) {} }
   }
   function deployLevel() { return Math.max(0, deployLv); }
@@ -539,13 +536,12 @@ window.FLOW_SCENE = (function () {
       decisionOverlay();
       card('place', true, '全局评估中…');
     }, 200);
-    [['R1', 'MHD-1', '选中 · 评分 86'], ['R3', 'MHD-3', '候选 · 拥塞驱动']].forEach(function (c, i) {
+    [['R1', 'MHD-1', '选中 · 评分 86'], ['R3', 'MHD-3', '选中 · 评分 64']].forEach(function (c, i) {
       later(function () {
         ring(c[0], true);
         card('topo', true, 'CXL 可达');
         var x = rackX(rackIdxOf(c[0]));
-        callout(x + 4, 78, c[0] + ' / ' + c[1] + ' · ' + c[2], null,
-          c[2].indexOf('选中') === 0 ? '#53e3c4' : '#5f9fe8');
+        callout(x + 4, 78, c[0] + ' / ' + c[1] + ' · ' + c[2], null, '#53e3c4');
       }, 400 + i * 900);
     });
     later(function () {
@@ -669,14 +665,12 @@ window.FLOW_SCENE = (function () {
     /* 部署等级对齐阶段起点（后退/跳转时同步降级或升级，不播动画） */
     var startLv = (FLOW.START_LEVEL && FLOW.START_LEVEL[idx] !== undefined) ? FLOW.START_LEVEL[idx] : 3;
     if (deployLv !== startLv) setDeployLevel(startLv, false);
-    /* 自动模式：阶段内增量部署动画（T1 在 03 存储决策触发，T2/T3 在 06 迁移复制触发）；
-       手动模式：交由用户点击底部部署时间轴触发 */
+    /* 自动模式：T1（R1+R3 同批）在 03 存储决策内动画触发；
+       手动模式：交由用户点击底部部署时间轴触发。
+       T2（KV 重分配）为数据行为，由 06 阶段动画呈现，无硬件变化。 */
     if (autoDeploy) {
       if (stage.id === 'decide') {
         later(function () { if (deployLv < 1) setDeployLevel(1, true); }, 1400);
-      } else if (stage.id === 'migrate') {
-        later(function () { if (deployLv < 2) setDeployLevel(2, true); }, 1500);
-        later(function () { if (deployLv < 3) setDeployLevel(3, true); }, 3300);
       }
     }
     var fn = ANIMS[stage.anim.type];

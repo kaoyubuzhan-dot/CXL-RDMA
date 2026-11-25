@@ -53,15 +53,14 @@ window.__RENDER_FLOW__ = (function () {
     if (!strip) return;
     var s = st();
     var act1 = s.mode === 'manual' && lv < 1 && s.stage >= 2;
-    var act2 = s.mode === 'manual' && lv >= 1 && lv < 2 && s.stage >= 5;
     strip.querySelectorAll('[data-dep]').forEach(function (n) {
       var i = +n.getAttribute('data-dep');
       n.classList.toggle('is-done', lv > i);
       n.classList.toggle('is-cur', lv === i);
-      n.classList.toggle('is-act', (i === 1 && act1) || (i === 2 && act2));
+      n.classList.toggle('is-act', i === 1 && act1);
     });
     var cnt = strip.querySelector('.fl-dep-cnt');
-    if (cnt) cnt.textContent = (lv >= 2 ? 2 : lv) + ' / 4 机架';
+    if (cnt) cnt.textContent = (lv >= 1 ? 2 : 0) + ' / 4 机架';
   }
 
   function onPick(id) {
@@ -206,20 +205,19 @@ window.__RENDER_FLOW__ = (function () {
 
     /* 并行时间轴：CXL 增量部署（T0→T3，与上方 KV 生命周期对齐）
        手动模式下 T1/T2 变为可点击按钮，由用户决定何时从全量 RDMA 跳转到增量 */
-    var lv = scene.deployLevel ? scene.deployLevel() : 3;
+    var lv = scene.deployLevel ? scene.deployLevel() : 1;
     var mode = st().mode || 'auto';
     var idx = st().stage;
     var act1 = mode === 'manual' && lv < 1 && idx >= 2;
-    var act2 = mode === 'manual' && lv >= 1 && lv < 2 && idx >= 5;
     h += '<div class="fl-dep" id="fl-dep-strip">';
-    h += '<span class="fl-dep-h">CXL 增量部署</span><span class="fl-dep-cnt">' + (lv >= 2 ? 2 : lv) + ' / 4 机架</span>';
+    h += '<span class="fl-dep-h">CXL 增量部署</span><span class="fl-dep-cnt">' + (lv >= 1 ? 2 : 0) + ' / 4 机架</span>';
     h += '<span class="fl-dep-mode"><button type="button" class="fl-dep-mb' + (mode === 'auto' ? ' is-on' : '') +
       '" data-depmode="auto" title="Controller 按决策矩阵自动部署">自动</button>' +
       '<button type="button" class="fl-dep-mb' + (mode === 'manual' ? ' is-on' : '') +
-      '" data-depmode="manual" title="由你点击 T1/T2 决定何时增量部署">手动</button></span>';
+      '" data-depmode="manual" title="由你点击 T1 决定何时增量部署">手动</button></span>';
     h += F.DEP.map(function (d, i) {
       var cls = lv > i ? 'is-done' : lv === i ? 'is-cur' : '';
-      if ((i === 1 && act1) || (i === 2 && act2)) cls += ' is-act';
+      if (i === 1 && act1) cls += ' is-act';
       return '<button type="button" class="fl-dep-t ' + cls + '" data-dep="' + i +
         '" title="' + esc(d.brief) + (i === 1 && act1 ? ' · 点击执行部署' : '') + '">' +
         '<b>' + d.id + '</b><span>' + esc(d.zh) + '</span></button>' +
@@ -271,26 +269,22 @@ window.__RENDER_FLOW__ = (function () {
   }
   function onDepClick(i) {
     var s = st();
-    var lv = scene.deployLevel ? scene.deployLevel() : 3;
+    var lv = scene.deployLevel ? scene.deployLevel() : 1;
     if (s.mode !== 'manual') { S.toast('自动模式下由 Controller 按决策矩阵部署，可切换为手动模式亲自操作'); return; }
     if (i === 1 && lv < 1) {
       if (s.stage < 2) { S.toast('请先运行到 03 存储决策，查看全局评估依据'); return; }
       doDeploy(1);
-    } else if (i === 2 && lv >= 1 && lv < 2) {
-      if (s.stage < 5) { S.toast('T2 由跨机架共享需求驱动，在 06 迁移复制阶段部署'); return; }
-      doDeploy(2);
+    } else if (i === 2) {
+      S.toast('T2 是 KV 数据重分配，硬件不变，随 06 迁移复制阶段自动执行');
     } else if (i <= lv) {
-      S.toast('T' + i + ' 已完成部署');
+      S.toast('T' + i + ' 已完成');
     } else {
-      S.toast('请按顺序先完成前置部署');
+      S.toast('请先完成前置部署');
     }
   }
   function doDeploy(i) {
     scene.setDeployLevel(i, true);
-    if (i === 2) {
-      setTimeout(function () { if (scene.deployLevel() === 2) scene.setDeployLevel(3, true); }, 1900);
-    }
-    pushLog('手动部署执行 → T' + i);
+    pushLog('手动部署执行 → T' + i + '（R1+R3 同批上线）');
     scheduleNext();
   }
   function scheduleNext() {
@@ -326,11 +320,10 @@ window.__RENDER_FLOW__ = (function () {
     if (window.__SIM__ && S.log) { try { S.log('[FLOW ' + sg.n + '] ' + sg.zh); } catch (e) {} }
     renderLeft(); renderRight(); renderDeck();
     if (s.playing) {
-      var lv = scene.deployLevel ? scene.deployLevel() : 3;
-      var block = s.mode === 'manual' &&
-        ((sg.id === 'decide' && lv < 1) || (sg.id === 'migrate' && lv < 2));
+      var lv = scene.deployLevel ? scene.deployLevel() : 1;
+      var block = s.mode === 'manual' && sg.id === 'decide' && lv < 1;
       if (block) {
-        pushLog('手动模式：请在底部部署时间轴点击 ' + (sg.id === 'decide' ? 'T1' : 'T2') + ' 执行增量部署后继续');
+        pushLog('手动模式：请在底部部署时间轴点击 T1 执行增量部署后继续');
         renderDeck();
       } else {
         scheduleNext();

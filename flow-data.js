@@ -74,11 +74,11 @@ window.FLOW = (function () {
     },
     {
       id: 'decide', n: '03', zh: '存储决策', en: 'PLACEMENT',
-      caption: 'Controller 综合全网拓扑 / 历史热度 / 拥塞 / 利用率 / 成本 全局评估 → 触发 T1',
-      act: 'Placement Controller 汇总四机架画像：访问局部性、历史 KV 热度、RDMA 链路拥塞、拓扑利用率、部署成本，加权评分后排定部署优先级',
-      obj: '全局决策矩阵 · R1-R4 评分排序 · R1 ← CXL Switch + MHD-1 · N1/N2 接入',
-      why: '决策不是单看某一个机架：R1 局部性 {local}% 且评分最高；R3 受 Spine 拥塞 86% 驱动列为 T2；R2/R4 收益低于成本暂不部署',
-      res: 'T1 执行：R1 出现 CXL Switch 与共享 MHD-1，N1/N2 接入共享内存池；{kv} 写入 MHD-1',
+      caption: 'Controller 综合全网拓扑 / 历史热度 / 拥塞 / 利用率 / 成本 全局评估 → 一次决策，R1+R3 同批部署',
+      act: 'Placement Controller 汇总四机架画像（阶段 02 已一次采齐）：局部性、历史热度、拥塞、利用率、成本，加权评分后同时排定 R1 与 R3',
+      obj: '全局决策矩阵 · R1 86 / R3 64 · 两机架并行上线 CXL Switch + 共享 MHD',
+      why: '证据一次采齐就没有分批等待的理由：R1 局部性 {local}% 评分最高；R3 的共享热度与 Spine 拥塞 86% 决策时已可见，一并部署',
+      res: 'T1 执行：R1 与 R3 同时出现 CXL Switch 与共享 MHD，各接入 N1/N2；{kv} 写入 R1-MHD-1',
       metrics: { 延迟: '—', 链路: '{load}', 占用: '{occ}' },
       anim: { type: 'decide' }
     },
@@ -98,17 +98,17 @@ window.FLOW = (function () {
       act: '本地：同机架节点经 CXL 从 {dst} 读取 KV；远端：另一机架仍必须走 Leaf-Spine 跨机架 RDMA',
       obj: '{kv} · CXL 链路（T1 新增） · RDMA 链路（存量）',
       why: 'T1 部署后本地访问可省掉跨机架往返：0.9 µs vs 基线 4.1 µs，这就是增量部署的直接收益',
-      res: 'KV Block 回填 GPU HBM；跨机架访问仍走 RDMA —— 由此引出 T2：R3 也需要部署 CXL',
+      res: 'KV Block 回填 GPU HBM；未部署 CXL 的 R2/R4 仍走 4.1 µs RDMA —— 评分 31/26 低于阈值，正是决策矩阵的取舍',
       metrics: { 延迟: '{delay}', 链路: '{load}', 占用: '{occ}' },
       anim: { type: 'access' }
     },
     {
       id: 'migrate', n: '06', zh: '迁移复制', en: 'MIGRATE / COPY',
-      caption: 'T2：R3 依据跨机架共享需求部署 CXL → T3：热点 KV 迁入 MHD、共享 KV 生成副本',
+      caption: 'T2：硬件已就位，数据开始重分配——热点 KV 迁入本地 MHD、共享 KV 生成副本',
       act: 'A. 迁移：{kv} 从旧位置搬向 {dst}；B. 复制：多机架共享的高频 KV 在对端生成副本',
-      obj: '{kv}（原件）· 新副本 · Directory 版本 · T2 新部署的 R3-MHD',
+      obj: '{kv}（原件）· 新副本 · Directory 版本 · T1 新上线的 R1/R3 MHD',
       why: '访问主体迁移时迁移更省容量；多机架共享时复制能避免跨机架往返',
-      res: 'T3 完成：热点 KV 迁入 MHD、副本落位，MHD 利用率升至 63%，Directory 版本升至 {ver}',
+      res: 'T2 完成：热点 KV 迁入 MHD、副本落位，MHD 利用率升至 63%，Directory 版本升至 {ver}',
       metrics: { 延迟: '{delay}', 链路: '{load}', 占用: '{occ}' },
       anim: { type: 'migrate' }
     },
@@ -125,16 +125,17 @@ window.FLOW = (function () {
   ];
 
   /* ── CXL 增量部署事件时间轴（与 KV 生命周期并行）──
-   * T0 全 RDMA 基线 → T1 Rack1 部署 → T2 Rack3 部署 → T3 KV 重分配
-   * START_LEVEL[i] = 第 i 个生命周期阶段开始时的部署等级（0-3），
-   * 场景据此同步硬件状态；T1 在阶段 03 内动画触发，T2/T3 在阶段 06 内触发。 */
+   * T0 全 RDMA 基线 → T1 R1+R3 同批部署 → T2 KV 重分配
+   * 证据在阶段 02 一次采齐，阶段 03 一次决策、同批执行——
+   * 不存在"等 R3 的需求再出现才部署"的时间差。
+   * START_LEVEL[i] = 第 i 个生命周期阶段开始时的部署等级（0-1），
+   * T1 在阶段 03 内动画触发；T2 为数据行为，随阶段 06 动画呈现。 */
   var DEP = [
     { id: 'T0', zh: '全 RDMA 基线', brief: '0 / 4 CXL 机架 · 仅存量 RDMA + 远端内存池' },
-    { id: 'T1', zh: 'Rack 1 部署 CXL', brief: '1 / 4 · CXL Switch + MHD-1 · N1/N2 接入' },
-    { id: 'T2', zh: 'Rack 3 部署 CXL', brief: '2 / 4 · 跨机架共享需求驱动' },
-    { id: 'T3', zh: 'KV 重分配', brief: '热点迁入 MHD · 共享 KV 生成副本 · 利用率 63%' }
+    { id: 'T1', zh: 'R1+R3 同批部署', brief: '2 / 4 · 全局证据一次采齐、一次决策，两机架并行上线' },
+    { id: 'T2', zh: 'KV 重分配', brief: '热点迁入 MHD · 共享 KV 生成副本 · 利用率 63%' }
   ];
-  var START_LEVEL = [0, 0, 0, 1, 1, 1, 3];
+  var START_LEVEL = [0, 0, 0, 1, 1, 1, 1];
 
   /* ── 全局部署决策矩阵（阶段 03 呈现）──
    * Controller 不只看单个机架，而是综合全网证据加权评分：
@@ -145,9 +146,9 @@ window.FLOW = (function () {
     note: '综合评分 = 局部性 · 历史热度 · 拥塞收益 · 利用率 · 部署成本 加权（示意，非实测）',
     racks: [
       { id: 'R1', locality: 70, hot: 82, cong: 71, util: 63, cost: '低', score: 86,
-        pick: 'T1 · 首批部署', why: '访问集中 70% 却全部压在 RDMA 远端路径，本地化收益最大、回收周期最短' },
+        pick: '同批部署', why: '访问集中 70% 却全部压在 RDMA 远端路径，本地化收益最大、回收周期最短' },
       { id: 'R3', locality: 42, hot: 76, cong: 86, util: 48, cost: '低', score: 64,
-        pick: 'T2 · 次批部署', why: '跨机架共享热度高，Spine 链路拥塞 86%，随共享需求增长列入次批' },
+        pick: '同批部署', why: '跨机架共享热度高、Spine 拥塞 86% —— 证据已在阶段 02 采齐，与 R1 并行上线' },
       { id: 'R2', locality: 18, hot: 35, cong: 33, util: 22, cost: '低', score: 31,
         pick: '暂不部署', why: '访问稀疏、热度低，RDMA 远端池已够用，部署闲置率高' },
       { id: 'R4', locality: 12, hot: 22, cong: 29, util: 18, cost: '中', score: 26,
