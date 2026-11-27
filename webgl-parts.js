@@ -101,14 +101,14 @@
         .forEach(function (p) { feet.push({ p: [p[0] + pw / 2, .012, p[1] + pw / 2] }); });
       g.add(U.inst(U.geoCyl(.022, .024, 10), 'rubber', feet));
 
-      /* 侧板（可透 / 可拆） */
+      /* 侧板（可透 / 可拆：采用深邃烟熏防静电亚克力与冷轧钢微倒角边框，告别塑料感） */
       [
         { w: W - .02, h: Hh - .1, d: .008, pos: [0, Hh / 2, D / 2 - .012], dir: [0, 0, 1] },
         { w: W - .02, h: Hh - .1, d: .008, pos: [0, Hh / 2, -D / 2 + .012], dir: [0, 0, -1] },
         { w: .008, h: Hh - .1, d: D - .02, pos: [-W / 2 + .012, Hh / 2, 0], dir: [-1, 0, 0] },
         { w: .008, h: Hh - .1, d: D - .02, pos: [W / 2 - .012, Hh / 2, 0], dir: [1, 0, 0] }
       ].forEach(function (s, idx) {
-        var p = U.boxE(s.w, s.h, s.d, idx === 0 ? 'glassFront' : 'glass', { color: 0x63a8bd, opacity: .3, edgeOpacity: .3 });
+        var p = U.boxE(s.w, s.h, s.d, idx === 0 ? 'glassFront' : 'glass', { color: 0x18242e, opacity: .18, edgeOpacity: .35 });
         p.position.set(s.pos[0], s.pos[1], s.pos[2]);
         p.userData.glass = true;
         p.userData.home = p.position.clone();
@@ -204,26 +204,26 @@
       g.add(U.liner(sm, 'liner'));
       meta(sm, body, cfg.meta);
 
-      /* 顶盖：带快拆把手与型号丝印，可独立拆 */
-      var lid = U.boxE(w - .042, .005, d - .05, 'steel', { color: 0x7f9dab, opacity: .55 });
+      /* 顶盖：工业镀锌拉丝钢板，带快拆把手与型号丝印，可独立拆 */
+      var lid = U.boxE(w - .042, .005, d - .05, 'steel', { color: 0x4a5d6b, opacity: .85 });
       lid.position.set(0, halfH - .0025, -.01);
       g.add(lid);
-      meta(lid.userData.mesh, body, { name: (cfg.nid || '') + ' · 上盖', detail: '快拆式机盖 · 带导风密封条' });
+      meta(lid.userData.mesh, body, { name: (cfg.nid || '') + ' · 上盖', detail: '快拆式冷轧钢机盖 · 带导风密封条' });
       var lidTabs = [];
       [-.14, .14].forEach(function (x) { lidTabs.push({ p: [x, halfH + .004, .12] }); });
       g.add(U.inst(U.geoBox(.05, .008, .018), 'plastic', lidTabs));
-      var lidLbl = U.decal((cfg.nid || 'SRV') + '  4U GPU  ·  4×H100', .19, .024, '#8fb9c6', 22);
+      var lidLbl = U.decal((cfg.nid || 'SRV') + '  4U GPU  ·  4×H100', .19, .024, '#a2c4d4', 22);
       lidLbl.position.set(-.02, halfH + .001, -.14);
       lidLbl.rotation.x = -Math.PI / 2;
       g.add(lidLbl);
 
-      /* 前面板：19″ 满幅 + 左右挂耳 + 盘位 + 状态灯 + 铭牌 */
-      var bezel = U.boxE(w, h - .008, .014, 'plastic', { color: 0x5f7d8c, opacity: .6 });
+      /* 前面板：19″ 满幅深黑阳极氧化铝合金面板 + 左右耳挂 + 盘位 + 状态灯 + 铭牌 */
+      var bezel = U.boxE(w, h - .008, .014, 'plastic', { color: 0x161e24, opacity: .95 });
       bezel.position.set(0, 0, halfD - .007);
       g.add(bezel);
       meta(bezel.userData.mesh, body, { name: (cfg.nid || '') + ' · 前面板', detail: '19″ 满幅 · 12 盘位 · 状态灯组' });
       [-1, 1].forEach(function (sgn) {
-        var ear = U.boxE(.022, h - .006, .016, 'steel', { color: 0x8aa5b2, opacity: .7 });
+        var ear = U.boxE(.022, h - .006, .016, 'steel', { color: 0x5a6d7c, opacity: .9 });
         ear.position.set(sgn * (w / 2 - .011), 0, halfD - .002);
         g.add(ear);
       });
@@ -442,7 +442,7 @@
       meta(shell.userData.mesh, body, cfg.meta);
 
       /* 前面板 Host 端口笼 ×8 */
-      var bezel = U.boxE(w, h - .006, .012, 'plastic', { color: 0x5f7d8c, opacity: .6 });
+      var bezel = U.boxE(w, h - .006, .012, 'plastic', { color: 0x111c19, opacity: .95 });
       bezel.position.set(0, 0, d / 2 - .006);
       g.add(bezel);
       var cages = [], lips = [];
@@ -512,7 +512,7 @@
       g.add(U.liner(frame.userData.mesh, 'liner'));
       meta(frame.userData.mesh, body, cfg.meta);
 
-      var bezel = U.boxE(w, h - .008, .012, 'plastic', { color: 0x5f7d8c, opacity: .55 });
+      var bezel = U.boxE(w, h - .008, .012, 'plastic', { color: 0x0e1c18, opacity: .95 });
       bezel.position.set(0, 0, d / 2 - .006);
       g.add(bezel);
 
