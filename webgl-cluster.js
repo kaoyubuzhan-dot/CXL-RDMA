@@ -29,6 +29,21 @@
   var clamp01 = function (v) { return v < 0 ? 0 : v > 1 ? 1 : v; };
   var ease = function (t) { return t < .5 ? 4 * t * t * t : 1 - M.pow(-2 * t + 2, 3) / 2; };
 
+  /* ── 部署切换补间：CXL 硬件组 scale.y 从机柜底部长出来 / 收回去 ── */
+  var tweens = [];
+  function addTween(dur, set, done) {
+    tweens.push({ t: 0, dur: Math.max(.01, dur), set: set, done: done });
+  }
+  function tickTweens(dt) {
+    for (var i = tweens.length - 1; i >= 0; i--) {
+      var tw = tweens[i];
+      tw.t += dt / tw.dur;
+      var k = clamp01(tw.t);
+      tw.set(ease(k));
+      if (k >= 1) { tweens.splice(i, 1); if (tw.done) tw.done(); }
+    }
+  }
+
   /* ── 共享给 fx 模块的上下文 ── */
   var CTX = {
     THREE: THREE, U: U, C: C, RACK_POS: RACK_POS, CXL_RACKS: CXL_RACKS,
@@ -83,46 +98,57 @@
     var tor = U.boxE(RW - .1, .04, RD * .5, 'switchBody', { color: 0x5f9fe8, opacity: .55 });
     tor.position.set(0, .056 + 40 * UH, 0); g.add(tor);
 
-    /* MHD / 空槽盲板 */
+    /* MHD / 空槽盲板：每台机架同时构建 CXL 硬件组与盲板组，
+       由 setDeploy 按部署状态切换显隐（带生长动画）——
+       这样"增量部署决策"变化时 2D / 3D 两个视图能一起变 */
     var mhdY = .056 + 22 * UH + UH / 2;
-    if (cxl) {
+    var gx = new THREE.Group();          // CXL 硬件组（MHD + Switch + 连线 + 容量条 + 标签）
+    gx.scale.y = .001; gx.visible = false;
+    var gb = new THREE.Group();          // RDMA-only 盲板组
+    if (true) {
       var mh = U.boxE(RW - .12, 3 * UH - .006, RD - .14, 'mhdUnit', { color: 0x53e3c4, opacity: .58 });
       mh.userData.mesh.material.emissive.setHex(C.cxl);
       mh.userData.mesh.material.emissiveIntensity = .42;
-      mh.position.set(0, mhdY, .04); g.add(mh);
+      mh.position.set(0, mhdY, .04); gx.add(mh);
       var ml = [];
       for (i = 0; i < 4; i++) ml.push({ p: [-.14 + i * .07, mhdY, RD / 2 - .042] });
-      g.add(U.inst(U.geoBox(.01, .006, .003), 'ledCxl', ml));
+      gx.add(U.inst(U.geoBox(.01, .006, .003), 'ledCxl', ml));
 
       /* CXL Switch：主机端口汇聚 → MHD（对应需求文档「连接数 ≠ 容量」） */
       var swY = .056 + 26 * UH;
       var sw = U.boxE(RW - .16, 1.6 * UH, RD - .24, 'switchBody', { color: 0x53e3c4, opacity: .82 });
-      sw.position.set(0, swY, .02); g.add(sw);
+      sw.position.set(0, swY, .02); gx.add(sw);
       var swLeds = [];
       for (i = 0; i < 6; i++) swLeds.push({ p: [-.13 + i * .052, swY + .014, RD / 2 - .1] });
-      g.add(U.inst(U.geoBox(.008, .005, .003), 'ledCxl', swLeds));
+      gx.add(U.inst(U.geoBox(.008, .005, .003), 'ledCxl', swLeds));
 
       /* 主机端口连线：MHD ↔ Switch（4 条，示意 2 个主机口 × 2 条链路） */
       var cables = [];
       for (i = 0; i < 4; i++) cables.push({ p: [-.12 + i * .08, .056 + 24.55 * UH, .3] });
-      g.add(U.inst(U.geoBox(.012, 1.02 * UH, .012), 'ledCxl', cables));
+      gx.add(U.inst(U.geoBox(.012, 1.02 * UH, .012), 'ledCxl', cables));
 
       /* MHD 容量条：R1 约 320/512，R3 约 192/512 */
       var capW = RW - .18;
       var usedR = (id === 'R3') ? .375 : .625;
       var capBg = U.box(capW, .014, .004, 'frameDark');
-      capBg.position.set(0, mhdY - 1.16 * UH, RD / 2 - .012); g.add(capBg);
+      capBg.position.set(0, mhdY - 1.16 * UH, RD / 2 - .012); gx.add(capBg);
       var capFill = U.box(capW * usedR, .014, .006, 'ledCxl');
-      capFill.position.set(-capW * (1 - usedR) / 2, mhdY - 1.16 * UH, RD / 2 - .009); g.add(capFill);
-      var mhdTag = U.decal((id === 'R3' ? 'MHD 192/512' : 'MHD 320/512'), .24, .032, '#c9fff2', 30);
-      mhdTag.position.set(0, mhdY + .062, RD / 2 - .006); g.add(mhdTag);
+      capFill.position.set(-capW * (1 - usedR) / 2, mhdY - 1.16 * UH, RD / 2 - .009); gx.add(capFill);
+      var mhdTag = U.decal('MHD ' + (id === 'R3' ? '192' : '320') + '/512', .24, .032, '#c9fff2', 30);
+      mhdTag.position.set(0, mhdY + .062, RD / 2 - .006); gx.add(mhdTag);
       var tagBg = U.box(.27, .046, .003, 'frameDark');
-      tagBg.position.set(0, mhdY + .059, RD / 2 - .012); g.add(tagBg);
-    } else {
+      tagBg.position.set(0, mhdY + .059, RD / 2 - .012); gx.add(tagBg);
+    }
+    {
       var blk = [];
       for (var u = 23; u <= 25; u++) blk.push({ p: [0, .056 + (u - 1) * UH + UH / 2, RD / 2 - .05] });
-      g.add(U.inst(U.geoBox(RW - .13, .032, .006), 'frameDark', blk));
+      gb.add(U.inst(U.geoBox(RW - .13, .032, .006), 'frameDark', blk));
     }
+    g.add(gx); g.add(gb);
+    gx.visible = !!cxl; gx.scale.y = cxl ? 1 : .001;
+    g.userData.cxlParts = gx;
+    g.userData.blindParts = gb;
+    g.userData.cxlOn = !!cxl;
 
     /* 其余空 U 盲板 */
     var used = [[7, 22], [23, 25], [40, 41]], blanks = [];
@@ -134,8 +160,13 @@
     }
     if (blanks.length) g.add(U.inst(U.geoBox(RW - .14, .03, .005), 'frameDark', blanks));
 
-    var tag = U.decal(id + ' · ' + (cxl ? 'CXL+RDMA' : 'RDMA-only'), .3, .055, cxl ? '#7ff0d3' : '#8fb9c6', 28);
-    tag.position.set(0, RH + .1, .26); g.add(tag);
+    /* 机架标签：CXL / RDMA-only 两套，随部署状态切换 */
+    var tagC = U.decal(id + ' · CXL+RDMA', .3, .055, '#7ff0d3', 28);
+    tagC.position.set(0, RH + .1, .26); g.add(tagC);
+    var tagR = U.decal(id + ' · RDMA-only', .3, .055, '#8fb9c6', 28);
+    tagR.position.set(0, RH + .1, .26); g.add(tagR);
+    tagC.visible = !!cxl; tagR.visible = !cxl;
+    g.userData.tagC = tagC; g.userData.tagR = tagR;
 
     g.position.set(pos.x, 0, pos.z);
     g.userData.pick = { kind: 'rack', id: id };
@@ -305,27 +336,24 @@
     labelDefs = ['R1', 'R2', 'R3', 'R4'].map(function (id) {
       return { id: id, p: new THREE.Vector3(RACK_POS[id].x, RH + .16, RACK_POS[id].z), txt: id };
     });
-    /* CXL 机架补部件标注：默认视角下也能看清 MHD 容量与 CXL Switch */
-    ['R1', 'R3'].forEach(function (id) {
+    /* CXL 部件标注：随部署状态显隐 —— dep = { rack, on } 表示
+       该机架部署 CXL（on=true）或未部署（on=false）时才显示 */
+    ['R1', 'R2', 'R3', 'R4'].forEach(function (id) {
       var pos = RACK_POS[id];
-      var flip = id === 'R3' ? -1 : 1;   /* 背面机架朝相反方向错开，避免压在一起 */
+      var flip = (id === 'R3' || id === 'R4') ? -1 : 1;   /* 背面机架朝相反方向错开，避免压在一起 */
       labelDefs.push({
-        id: id + '.MHD', sub: 1, txt: id === 'R3' ? 'MHD 192/512 GB' : 'MHD 320/512 GB',
-        ox: 34 * flip, oy: 10,
+        id: id + '.MHD', sub: 1, txt: 'MHD ' + (id === 'R3' ? '192' : '320') + '/512 GB',
+        dep: { rack: id, on: true }, ox: 34 * flip, oy: 10,
         p: new THREE.Vector3(pos.x, .056 + 22.5 * UH, pos.z + RD / 2 + .04)
       });
       labelDefs.push({
         id: id + '.SW', sub: 1, txt: 'CXL SWITCH · 2 HOST',
-        ox: 34 * flip, oy: -14,
+        dep: { rack: id, on: true }, ox: 34 * flip, oy: -14,
         p: new THREE.Vector3(pos.x, .056 + 26.4 * UH, pos.z + RD / 2 + .04)
       });
-    });
-    /* 纯 RDMA 机架：明确标注没有 CXL 设备 */
-    ['R2', 'R4'].forEach(function (id) {
-      var pos = RACK_POS[id];
       labelDefs.push({
         id: id + '.RDMA', sub: 1, txt: 'NO CXL · RDMA ONLY',
-        ox: id === 'R4' ? -34 : 34, oy: 8,
+        dep: { rack: id, on: false }, ox: 34 * flip, oy: 8,
         p: new THREE.Vector3(pos.x, .056 + 22.5 * UH, pos.z + RD / 2 + .04)
       });
     });
@@ -342,8 +370,15 @@
     if (!labelLayer || !labelEls.length) return;
     var w = host.clientWidth, h = host.clientHeight;
     labelDefs.forEach(function (d, i) {
-      _v3.copy(d.p).project(camera);
       var el = labelEls[i];
+      /* 部署感知标签：MHD/SW 标注仅在已部署时显示，NO-CXL 标注仅在未部署时显示 */
+      if (d.dep) {
+        var rk = rackBodies[d.dep.rack];
+        var on = !!(rk && rk.userData && rk.userData.cxlOn);
+        if (on !== d.dep.on) { el.style.display = 'none'; return; }
+        el.style.display = '';
+      }
+      _v3.copy(d.p).project(camera);
       if (_v3.z > 1) { el.style.opacity = '0'; return; }
       el.style.opacity = '1';
       /* ox/oy 为像素级微调：背面机架透视压缩后标注会挤在一起，用它拉开 */
@@ -436,6 +471,7 @@
       controls.target.lerpVectors(camTween.t0, camTween.t1, k);
       if (camTween.t >= 1) camTween = null;
     }
+    tickTweens(dt);
 
     if (ctrlRef) {
       ctrlRef.traverse(function (o) {
@@ -473,6 +509,40 @@
       setCong([]);
       if (window.__GLCLUSTER_FX__) window.__GLCLUSTER_FX__.applyStep(act, done);
       else if (done) done();
+    },
+    /* 部署状态同步：ids = 已部署 CXL 的机架 id 数组。
+       与 2D 总览共用 STATE.deployment —— 决策变化时两个视图一起变（生长/收回动画）。 */
+    setDeploy: function (ids, animate) {
+      var target = {};
+      (ids || []).forEach(function (id) { target[id] = 1; });
+      Object.keys(rackBodies).forEach(function (id) {
+        var g = rackBodies[id], ud = g.userData;
+        if (!ud.cxlParts) return;
+        var on = !!target[id];
+        if (ud.cxlOn === on) return;
+        ud.cxlOn = on;
+        var parts = ud.cxlParts, blind = ud.blindParts;
+        if (ud.tagC && ud.tagR) { ud.tagC.visible = on; ud.tagR.visible = !on; }
+        if (!animate || REDUCED) {
+          parts.visible = on; parts.scale.y = on ? 1 : .001;
+          if (blind) blind.visible = !on;
+          return;
+        }
+        if (on) {
+          parts.visible = true; parts.scale.y = .001;
+          if (blind) blind.visible = false;
+          addTween(.7, function (k) { parts.scale.y = M.max(.001, k); });
+        } else {
+          if (blind) blind.visible = true;
+          addTween(.5, function (k) { parts.scale.y = M.max(.001, 1 - k); },
+            function () { if (!ud.cxlOn) parts.visible = false; });
+        }
+      });
+    },
+    deployState: function () {
+      return Object.keys(rackBodies).filter(function (id) {
+        return rackBodies[id].userData && rackBodies[id].userData.cxlOn;
+      });
     },
     flyTo: flyTo,
     select: function (id) { selectedId = id; },

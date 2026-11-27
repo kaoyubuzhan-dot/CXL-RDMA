@@ -52,8 +52,8 @@
     </g>`;
   }
 
-  // 单个机架（overview / traffic 用）
-  function rackGroup(r, idx) {
+  // 单个机架（overview / traffic 用）；grow = 本轮部署状态变化 → MHD 组播放生长动画
+  function rackGroup(r, idx, grow) {
     const x = 34 + idx * 292, y = 176, w = 258, h = 352;
     const cxl = STATE.deployment[r.id];
     const mhd = mhdForRack(r.id);
@@ -100,7 +100,7 @@
       mhdBox = `<g>
         <path d="M${x+140} ${y+152} L${x+140} ${y+176}" stroke="${C.cxl}" stroke-width="1.2" stroke-dasharray="3 2" opacity=".7"/>
         <rect x="${x+56}" y="${y+176}" width="168" height="60" rx="3" fill="rgba(83,227,196,.08)" stroke="${C.cxl}" stroke-width="1.2"/>
-        <text x="${x+64}" y="${y+191}" class="svg-label" font-size="11" fill="${C.cxl}">MHD × ${units.length} · ${capTotal} GB</text>
+        <text x="${x+64}" y="${y+191}" class="svg-label" font-size="11" fill="${C.cxl}">MHD × ${units.length} · ${capTotal} GB</text>
         ${rows}
       </g>`;
     } else {
@@ -115,10 +115,10 @@
       <text x="${x+w-12}" y="${y+20}" text-anchor="end" class="svg-label" font-size="12" fill="${cxl?C.cxl:C.rdma}">${cxl?'CXL + RDMA':'RDMA-only'}</text>
       ${nodes}
       <text x="${x+14}" y="${y+162}" class="svg-label" font-size="12" fill="#6c8290">${cxl?'仅已连接节点可访问 MHD':'全部节点走 DRAM + RDMA'}</text>
-      ${mhdBox}
+      ${grow ? '<g class="svg-deploy-grow">' + mhdBox + '</g>' : mhdBox}
       <rect x="${x+20}" y="${y+258}" width="${w-40}" height="34" rx="3" fill="rgba(95,159,232,.06)" stroke="rgba(95,159,232,.3)"/>
       <text x="${x+w/2}" y="${y+279}" text-anchor="middle" class="svg-label" font-size="12" fill="#a9cbef">RDMA NIC · 4 节点全接入</text>
-      <text x="${x+14}" y="${y+330}" class="svg-label" font-size="13" fill="#6c8290">4 GPU NODES · ${connectedNodeCount(r.id)} CXL LINK</text>
+      <text x="${x+14}" y="${y+330}" class="svg-label" font-size="13" fill="#6c8290">4 GPU NODES · ${connectedNodeCount(r.id)} CXL LINK</text>
     </g>`;
   }
 
@@ -187,6 +187,9 @@
   }
 
   // ---------- 页面渲染入口 ----------
+  /* 部署变化检测：只为发生变化的机架附加生长动画（其余重绘保持静态） */
+  let lastDeployKey = null;
+  function deployKey() { return RACKS.map(r => STATE.deployment[r.id] ? '1' : '0').join(''); }
   function renderCanvas() {
     const canvas = $('#canvas');
     if (!canvas) return;
@@ -195,18 +198,22 @@
       canvas.innerHTML = '';
       return;
     }
+    const key = deployKey();
+    const changedIds = lastDeployKey !== null && key !== lastDeployKey
+      ? RACKS.filter((r, i) => key[i] !== lastDeployKey[i]).map(r => r.id) : [];
+    lastDeployKey = key;
     let html = defs();
     if (STATE.page === 'overview') {
       if (STATE.oview === '3d' && window.__EXTRA__) {
         html += window.__EXTRA__.renderCluster3D();
       } else {
         html += controllerFabric();
-        RACKS.forEach((r, i) => html += rackGroup(r, i));
+        RACKS.forEach((r, i) => html += rackGroup(r, i, changedIds.includes(r.id)));
         html += interLinks();
       }
     } else if (STATE.page === 'traffic') {
       html += controllerFabric();
-      RACKS.forEach((r, i) => html += rackGroup(r, i));
+      RACKS.forEach((r, i) => html += rackGroup(r, i, false));
       html += interLinks();
       html += accessPaths();
     } else if (STATE.page === 'rack') {

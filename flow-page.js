@@ -96,7 +96,7 @@ window.__RENDER_FLOW__ = (function () {
     var h = '';
 
     h += '<div class="fl-sec"><div class="fl-sec-h"><span>实验场景</span><i>SCENARIO</i></div>' +
-      '<div class="fl-scn-hint">核心入口：这批 KV 有没有明确的主力访问机架？</div>';
+      '<div class="fl-scn-hint">核心入口：原生 RDMA 池水位 × 访问局部性 → S1–S4 分流</div>';
     F.SCENARIOS.forEach(function (sn) {
       h += '<button type="button" class="fl-scn' + (sn.id === s.scenario ? ' is-on' : '') + '" data-scn="' + sn.id + '">' +
         '<span class="fl-scn-k">' + sn.id + '</span>' +
@@ -153,6 +153,9 @@ window.__RENDER_FLOW__ = (function () {
       '</dl>' +
       '<div class="fl-meter"><span>热度</span><div class="fl-meter-bar"><i style="width:' + s.hot + '%"></i></div><b>' + s.hot + '</b></div>' +
       '<div class="fl-meter"><span>本地访问</span><div class="fl-meter-bar fl-meter-bar--cxl"><i style="width:' + s.local + '%"></i></div><b>' + s.local + '%</b></div>' +
+      (s.pool ? '<div class="fl-meter"><span>原生池</span><div class="fl-meter-bar"><i style="width:' +
+        Math.round(s.pool.used / 14 * 100) + '%"></i></div><b title="原生 RDMA 池：水位 ' + s.pool.used +
+        '/14 · 拥塞 ' + s.pool.cong + '%（示意，非实测）">' + s.pool.note + '</b></div>' : '') +
       '</div>';
 
     h += '<div class="fl-card fl-card--what"><div class="fl-card-h"><i class="fl-bar"></i><span>发生了什么</span><b>' + sg.n + '</b></div>' +
@@ -183,10 +186,10 @@ window.__RENDER_FLOW__ = (function () {
         spec('跨机架流量', mx.xr) +
         '</dl>' +
         '<div class="fl-mx-note" title="' + esc(mx.basis) + '">判定依据：' + esc(mx.basis) + '</div>' +
-        '<div class="fl-mx-fn">* 朴素策略 = 不看局部性，一律推远端 CXL · 示意，非实测</div></div>';
+        '<div class="fl-mx-fn">' + esc(mx.fn || '* 朴素策略 = 不看局部性，一律推远端 CXL · 示意，非实测') + '</div></div>';
     }
 
-    /* 阶段 03：呈现全局部署决策依据（随场景变化：S1/S2 部署 R1+R3，S3/S4 维持全 RDMA） */
+    /* 阶段 03：呈现离线增量部署决策（前提已落板，四情景共享同一矩阵） */
     if (sg.id === 'decide' && s.decision) {
       var D = s.decision;
       h += '<div class="fl-card"><div class="fl-card-h"><i class="fl-bar"></i><span>全局部署决策</span><b>评分</b></div>' +

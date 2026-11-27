@@ -730,3 +730,27 @@ button:focus-visible,input:focus-visible{outline:1px solid var(--accent);outline
   #lc-top .lc-cams{display:none}
   .lc-tick{min-width:70px}
 }
+
+/* ============================================================
+ * 02 集群总览 · 2D/3D 切换（合并原 06 三维建模入口）
+ *   - 三维 = WebGL 集群（#gllc，与生命周期页共用单例）
+ *   - 切换入场动画；部署变化时 2D / 3D 同步联动、均带动画
+ * ============================================================ */
+#view3d-btn{display:none}
+#app[data-page="overview"] #view3d-btn{display:inline-flex}
+#app[data-page="overview"] #view3d-btn.is-active{
+  color:var(--cxl);border-color:rgba(var(--cxl-rgb),.6);background:rgba(var(--cxl-rgb),.1)}
+#app[data-page="overview"][data-v3d="1"] #gllc{display:block}
+#app[data-page="overview"][data-v3d="1"] .canvas{
+  opacity:0;pointer-events:none;transition:opacity .45s ease}
+#app[data-page="overview"][data-v3d="0"] .canvas{transition:opacity .3s ease}
+#gllc.is-entering{animation:gllcIn .85s cubic-bezier(.2,.85,.3,1) both}
+@keyframes gllcIn{
+  from{opacity:0;transform:translateY(16px) scale(.985)}
+  to{opacity:1;transform:none}}
+/* 2D 侧部署变化生长动画（仅变化机架的 MHD 组附加） */
+.svg-deploy-grow{animation:svgGrow .65s cubic-bezier(.2,.85,.3,1.05) both;
+  transform-box:fill-box;transform-origin:center}
+@keyframes svgGrow{
+  from{opacity:0;transform:scale(.7)}
+  to{opacity:1;transform:scale(1)}}

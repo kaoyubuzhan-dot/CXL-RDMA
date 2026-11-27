@@ -39,17 +39,22 @@
     if (ui.top) return;
     var stage = $('stage');
 
-    ui.host = document.createElement('div');
-    ui.host.id = 'gllc';
-    stage.appendChild(ui.host);
+    /* 复用既有 #gllc（02 集群总览的 3D 切换可能已创建并挂载），避免重复 id 双场景 */
+    ui.host = document.getElementById('gllc');
+    if (!ui.host) {
+      ui.host = document.createElement('div');
+      ui.host.id = 'gllc';
+      stage.appendChild(ui.host);
+    }
 
     ui.bar = document.createElement('div');
     ui.bar.id = 'lc-bar';
     stage.appendChild(ui.bar);
 
     gl = window.__GLCLUSTER__;
-    if (gl && gl.available && !mounted) {
+    if (gl && gl.available && !mounted && !window.__CLUSTER3D_MOUNTED__) {
       gl.mount(ui.host, { onSelect: onPick });
+      window.__CLUSTER3D_MOUNTED__ = true;
       mounted = true;
     }
   }

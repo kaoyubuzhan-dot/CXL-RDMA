@@ -61,6 +61,8 @@
     }
     // 硬件视角切换按钮状态
     $$('[data-hwview]').forEach(b => b.classList.toggle('is-active', b.getAttribute('data-hwview') === STATE.hwView));
+    // 3D 集群部署同步：部署状态变化时 WebGL 侧一起变（生长/收回动画，未挂载时为空操作）
+    syncCluster3d(true);
     // 三维视图交给 WebGL 场景（不可用时回落 SVG）
     if (window.__GLUI__) { try { window.__GLUI__.sync(); } catch (e) {} }
     if (window.__GLA__) { try { window.__GLA__.sync(); } catch (e) {} }
@@ -69,6 +71,58 @@
   APP.renderRightOnly = function () {
     window.__RENDER_PANELS__.renderRight();
     window.__RENDER_PANELS__.renderConsole();
+  };
+
+  // ---------- 02 集群总览 · 2D/3D 切换（原 06 三维建模合并入口） ----------
+  // 确保三维集群容器存在并挂载（与 lc 页共用 #gllc 与 __GLCLUSTER__ 单例）
+  function ensureCluster3d() {
+    if (!window.__GLCLUSTER__ || !window.__GLCLUSTER__.available) {
+      toast('WebGL 不可用 · 回落 2D 视图');
+      return null;
+    }
+    let host = document.getElementById('gllc');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'gllc';
+      $('#stage').insertBefore(host, $('#stage-hint'));
+    }
+    if (!window.__CLUSTER3D_MOUNTED__) {
+      window.__GLCLUSTER__.mount(host, { onSelect: id => { if (id) toast('选中 ' + id); } });
+      window.__CLUSTER3D_MOUNTED__ = true;
+      syncCluster3d(false);   // 首次挂载即时对齐当前部署状态（无动画）
+    }
+    return host;
+  }
+  // 部署状态 → 3D 集群：APP.render 统一调用，部署变化时 3D 侧播放生长/收回动画
+  function syncCluster3d(animate) {
+    if (!window.__CLUSTER3D_MOUNTED__ || !window.__GLCLUSTER__ || !window.__GLCLUSTER__.available) return;
+    const ids = RACKS.filter(r => STATE.deployment[r.id]).map(r => r.id);
+    window.__GLCLUSTER__.setDeploy(ids, animate !== false);
+  }
+  APP.toggleOverview3d = function (force) {
+    if (typeof force === 'boolean') STATE.view3d = force;
+    else STATE.view3d = !STATE.view3d;
+    const app = $('#app');
+    app.setAttribute('data-v3d', STATE.view3d ? '1' : '0');
+    const btn = $('#view3d-btn');
+    if (btn) {
+      btn.classList.toggle('is-active', !!STATE.view3d);
+      btn.textContent = STATE.view3d ? '返回 2D' : '三维';
+    }
+    if (!STATE.view3d) { log('集群总览 → 2D 平面拓扑', true); return; }
+    const host = ensureCluster3d();
+    if (!host) {
+      app.setAttribute('data-v3d', '0'); STATE.view3d = false;
+      if (btn) { btn.classList.remove('is-active'); btn.textContent = '三维'; }
+      return;
+    }
+    // 入场动画：淡入 + 轻微上移（CSS is-entering）
+    host.classList.remove('is-entering');
+    void host.offsetWidth;
+    host.classList.add('is-entering');
+    setTimeout(() => host.classList.remove('is-entering'), 950);
+    window.__GLCLUSTER__.resize();
+    log('集群总览 → WebGL 三维视图（与 2D 同步联动）', true);
   };
 
   function updateStageHeader() {
@@ -702,6 +756,9 @@
     $('#fit-btn').addEventListener('click', ()=> toast('视图已复位'));
     // 硬件视角切换 / 三维旋转 / 硬件库部署 / 移除
     $$('[data-hwview]').forEach(b => b.addEventListener('click', ()=> APP.switchHWView(b.getAttribute('data-hwview'))));
+    // 02 集群总览 · 2D/3D 切换按钮（逻辑见 IIFE 顶层的 toggleOverview3d）
+    const v3btn = $('#view3d-btn');
+    if (v3btn) v3btn.addEventListener('click', () => APP.toggleOverview3d());
   const ovBtn = $('#oview-btn');
   if (ovBtn) {
     ovBtn.textContent = STATE.oview === '3d' ? '立体' : '平面';
@@ -748,6 +805,7 @@
     if (hv && ['physical','network','threeD','pipeline'].includes(hv)) STATE.hwView = hv;
     const ov = params.get('oview');
     if (ov === '2d' || ov === '3d') STATE.oview = ov;
+    const want3d = params.get('v3d') === '1';
     const sc = params.get('sc');
     APP.loadScenario(sc && SCENARIOS.some(s=>s.id===sc) ? sc : 'S1', true);
     // 可选参数（演示/测试用）：?cxl=R1,R2&units=3 —— 直接指定哪些机架部署 CXL、每机架几台 MHD
@@ -776,6 +834,7 @@
       STATE.selectedKV = (sc && sc.focusKV) || 'KV-003';
     }
     if (STATE.page === 'kv' || STATE.page === 'traffic') APP.render();
+    if (want3d && STATE.page === 'overview') APP.toggleOverview3d(true);
     const _st = S.cxlStats();
     log(`模拟器就绪 · 4 Racks · 16 Nodes · ${_st.count} CXL Racks · ${_st.units} MHD`);
   }

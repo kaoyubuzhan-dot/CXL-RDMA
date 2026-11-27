@@ -416,3 +416,13 @@
 .fl-mx-note{font-family:var(--cn);font-size:9.5px;line-height:1.5;color:var(--soft);cursor:help;
   border-top:1px dashed rgba(167,197,215,.14);margin-top:6px;padding-top:6px}
 .fl-mx-fn{font-family:var(--cn);font-size:8.5px;color:var(--deep);margin-top:4px}
+
+/* ============================================================
+ * v4 · 原生 RDMA 池水位状态（S2 回退 / S3 兜底 的核心叙事）
+ *   拥塞 ≥ 70% → 池框橙红高亮 + 水位条变红
+ *   池底状态条：全程可见，不被 03/04 决策浮层遮挡
+ * ============================================================ */
+.fx-pool.is-sat{stroke:rgba(240,120,90,.85);filter:url(#flowGlow)}
+.fx-pool-stat-bg{fill:rgba(8,14,19,.72);stroke:rgba(167,197,215,.2);stroke-width:.8}
+.fx-pool-stat{font-family:var(--mono);font-size:12.5px;letter-spacing:.05em;
+  fill:#7c93a4;transition:fill .3s}

@@ -5,16 +5,31 @@
  *   01 推理生成 02 信息采集 03 存储决策 04 局部性判定（核心分叉）
  *   05 位置查询 06 数据访问 07 迁移复制 08 淘汰回收
  *
- * 每个阶段描述四件事（参考需求文档「发生了什么」）：
- *   act 动作 · obj 对象 · why 原因 · res 结果
- * 以及该阶段独有动画 anim.type 与指标 metrics。
+ * 【前提焊死】离线增量决策已落板：R1/R3 带 CXL-MHD，R2/R4 无 CXL，
+ * 底座统一 Leaf-Spine RDMA —— 硬件固定，四情景共享同一份部署矩阵。
+ * 情景差异不是"选哪个池"的自由选择，而是由
+ * 原生 RDMA 池水位 & 代价阈值在运行时驱动出来的分流：
  *
- * 文本支持占位符，由 {kv} {prod} {local} {hot} {dst} {tier} 等在渲染时填充。
+ *   Cost(X) = 原生 RDMA 链路代价（全局原生 DRAM 池）
+ *   Cost(Y) = 跨机架 RDMA 转发代价 + CXL 访存代价（远端 R1/R3 MHD）
+ *   仅当原生池过载、Cost(X) 被抬到极高时 Cost(Y) 才反超：
+ *     S1 主力自带 CXL → 本地命中（增量部署主收益）
+ *     S2 水位未击穿   → 回退原生池，主动无视增量硬件
+ *     S3 水位击穿     → 兜底借用远端增量池（S3 不是常态）
+ *     S4 长期共享热点 → 复制托管增量池（区别于 S3 单次溢流救急）
+ *
+ * 每阶段描述：act 动作 · obj 对象 · why 原因 · res 结果
+ * 场景新增字段：
+ *   place   动画走向：mhd / pool / remote-mhd / copy
+ *   pool    原生池水位 { used, cong, note }
+ *   jq/jyes/jno/jpick  判定问题与是/否分支（jpick = 本情景走向）
+ * 文本占位符 {kv} {prod} {local} {hot} {dst} {tier} 等渲染时填充。
+ * 全部数值为教学示意，非实测。
  * ============================================================ */
 window.FLOW = (function () {
   'use strict';
 
-  /* ── 机架硬件模型：R1/R3 有共享 MHD，R2/R4 纯 RDMA ── */
+  /* ── 机架硬件模型：R1/R3 有共享 MHD，R2/R4 纯 RDMA（前提固定） ── */
   var RACKS = [
     { id: 'R1', tag: 'CXL + RDMA', cxl: true,
       nodes: [ { id: 'N1', role: 'Prefill', cxl: true }, { id: 'N2', role: 'Decode', cxl: true },
@@ -34,183 +49,179 @@ window.FLOW = (function () {
       mhd: [] }
   ];
 
-  /* ── 场景：同一套硬件，四种访问分布 → 四种放置决策 ──
-   * 对应「先判断访问局部性，再决定放置」框架：
-   *   S1 单机架高热度           → 本地 CXL（常态调度）
-   *   S2 公共上下文（突发共享） → 跨机架复制到 CXL
-   *   S3 生产=访问机架(RDMA-only) → 不部署远端 CXL
-   *   S4 多机架均匀             → 保留 RDMA 存储
-   * deploy: 本情景最终部署 CXL 的机架（空数组 = 维持全 RDMA）。
-   * decision: 本情景的全局决策矩阵（阶段 03 呈现）。
-   * ov: 按阶段覆盖默认文案（caption/act/obj/why/res）。
-   * 全部数值为教学示意，非实测。 */
+  /* ── 离线增量决策矩阵（前提已落板，四情景共享） ──
+   * 部署是离线一次性决策：全网长期负载证据一次采齐、一次决策、
+   * R1+R3 同批上线；不随单个 KV 变化。运行时走哪个池由 04 判定。 */
+  var OFFLINE_DEC = {
+    note: '离线增量决策（前提已落板）· 全网长期画像 · 示意，非实测',
+    racks: [
+      { id: 'R1', locality: 70, hot: 82, cong: 71, util: 63, cost: '低', score: 86, pick: '同批部署',
+        why: '跨机架访问占大头、本地化收益最大 · 增量成本回收周期最短' },
+      { id: 'R3', locality: 42, hot: 76, cong: 86, util: 48, cost: '低', score: 64, pick: '同批部署',
+        why: '共享热度高、Spine 拥塞 86% 决策时已可见 · 与 R1 并行上线' },
+      { id: 'R2', locality: 18, hot: 35, cong: 33, util: 22, cost: '低', score: 31, pick: '暂不部署',
+        why: '长期画像热度 / 局部性低 · 维持存量 RDMA 底座，增量预算集中投放 R1/R3' },
+      { id: 'R4', locality: 12, hot: 22, cong: 29, util: 18, cost: '中', score: 26, pick: '暂不部署',
+        why: '同上 · 观察负载形态是否收敛后再评估' }
+    ] };
+
+  /* ── 四情景：硬件固定，差异全部在运行时由水位判定驱动 ── */
   var SCENARIOS = [
-    { id: 'S1', zh: '单机架高热度', en: 'RACK-HOT', brief: '集中在同一 Rack · 长期热 → 本地 CXL · 常态调度',
-      kv: 'KV-001', prod: 'R1-N1', hot: 82, local: 70, dst: 'R1 / MHD-1', tier: 'CXL MHD',
-      peer: 'R2-N1', peerLoc: 30, replica: '—', ver: 'V1', delay: '0.9 µs', load: '48%', occ: '63%',
+    { id: 'S1', zh: '热点原生命中', en: 'LOCAL-HIT',
+      brief: '访问源 R1/R3（自带 CXL）· 历史热点就近命中本地 MHD',
+      kv: 'KV-001', prod: 'R1-N1', hot: 82, local: 70, dst: 'R1 / MHD-1', tier: 'CXL MHD（本地增量池）',
+      replica: '—', ver: 'V1', delay: '0.9 µs', load: '48%', occ: '63%',
       r1score: 86, r3score: 64, r3cong: 86,
-      verdict: '是 · 主力 R1', vdWhy: '请求分布 70% 落在 R1 · 热度周期长期稳定 · 访问机架集合 {R1}',
-      mx: { rica: '0.9 µs', naive: '2.7 µs', gain: '-67%', cap: '12%', xr: '0.3 GB/s',
-        basis: '主力机架明确且具备 CXL 底座 → 本地放置收益最大；朴素策略若强行分发多副本只会白占容量（示意，非实测）' },
+      place: 'mhd', pool: { used: 6, cong: 42, note: '水位正常' },
+      jq: '主力访问机架是否自带 CXL 增量池？',
+      jyes: '是 · 主力自带增量池 → 本地 MHD 就近命中（本情景）',
+      jno: '否 · RDMA-only 机架 → 进入溢流代价评估（S2 / S3 走向）',
+      jpick: 'yes',
+      verdict: '是 · 主力 R1/R3（自带 CXL）',
+      vdWhy: '请求分布 70% 落在 R1/R3 · 热度周期长期稳定 · 主力机架自带增量池 → 本地命中零转发',
+      mx: { rica: '0.9 µs', naive: '4.3 µs', gain: '-67%', cap: '12%', xr: '0.3 GB/s',
+        basis: '主力机架自带 CXL → 本地放置收益最大；朴素策略强行远端化只会白占容量（示意，非实测）' },
       cands: [
         { id: 'A', t: '本地 CXL', to: 'R1-MHD-1', ok: true, why: '主力机架 · 本地命中' },
         { id: 'C', t: '远端 MHD', to: 'R3', ok: false, why: '跨机架叠加 · 收益衰减' },
-        { id: 'D', t: 'RDMA Pool', to: 'POOL', ok: false, why: '延迟高于本地 CXL' }
+        { id: 'D', t: 'RDMA Pool', to: 'POOL', ok: false, why: '水位正常 · 延迟仍高于本地 CXL' }
       ],
       deploy: ['R1', 'R3'],
-      decision: {
-        note: '综合评分 = 局部性 · 历史热度 · 拥塞收益 · 利用率 · 部署成本 加权（示意，非实测）',
-        racks: [
-          { id: 'R1', locality: 70, hot: 82, cong: 71, util: 63, cost: '低', score: 86, pick: '同批部署',
-            why: '访问集中 70% 却全部压在 RDMA 远端路径，本地化收益最大、回收周期最短' },
-          { id: 'R3', locality: 42, hot: 76, cong: 86, util: 48, cost: '低', score: 64, pick: '同批部署',
-            why: '跨机架共享热度高、Spine 拥塞 86% —— 证据已在阶段 02 采齐，与 R1 并行上线' },
-          { id: 'R2', locality: 18, hot: 35, cong: 33, util: 22, cost: '低', score: 31, pick: '暂不部署',
-            why: '访问稀疏、热度低，RDMA 远端池已够用，部署闲置率高' },
-          { id: 'R4', locality: 12, hot: 22, cong: 29, util: 18, cost: '中', score: 26, pick: '暂不部署',
-            why: '无跨机架共享需求，增量成本回收周期长，维持存量架构' }
-        ] } },
-    { id: 'S2', zh: '公共上下文', en: 'SHARED-BURST', brief: '多机架共享 · 短期突发 → 跨机架复制到 CXL',
-      kv: 'KV-002', prod: 'R2-N1', hot: 91, local: 45, dst: 'R1-MHD-1 + R3-MHD-3（副本）', tier: 'CXL MHD 副本',
-      peer: 'R3-N2', peerLoc: 38, replica: 'R1-MHD-1 · R3-MHD-3', ver: 'V2', delay: '1.1 µs', load: '91%', occ: '84%',
-      r1score: 84, r3score: 78, r3cong: 91,
-      verdict: '是 · 多机架突发共享', vdWhy: '请求分布散落 R1/R2/R3 · 突发窗口内热度 88+ · 访问机架集合 {R1,R2,R3}',
-      mx: { rica: '1.1 µs', naive: '4.3 µs', gain: '-74%', cap: '18%', xr: '一次性 32 GB',
-        basis: '多机架同时读 → 一次复制分发副本，后续海量读全部走机架内 CXL；朴素策略让各机架反复远程拉取，压垮 Spine（示意，非实测）' },
-      cands: [
-        { id: 'A', t: '副本 → R1 CXL', to: 'R1-MHD-1', ok: true, why: 'R1 突发请求方 · 副本落地' },
-        { id: 'B', t: '副本 → R3 CXL', to: 'R3-MHD-3', ok: true, why: 'R3 同为请求方 · 副本落地' },
-        { id: 'C', t: '反复远端拉取', to: 'R1-X', ok: false, why: '跨机架读风暴 · 压垮 Spine' }
-      ],
-      deploy: ['R1', 'R3'],
-      decision: {
-        note: '突发长上下文被多机架同时请求 · 拥塞驱动（示意，非实测）',
-        racks: [
-          { id: 'R1', locality: 38, hot: 88, cong: 91, util: 63, cost: '低', score: 84, pick: '同批部署',
-            why: '突发请求占比高且 Spine 拥塞 91%，本地副本可立即卸载跨机架流量' },
-          { id: 'R3', locality: 34, hot: 85, cong: 88, util: 48, cost: '低', score: 78, pick: '同批部署',
-            why: '同为突发请求方 —— 副本就近放入本机架 MHD，避免重复占用 Spine' },
-          { id: 'R2', locality: 18, hot: 62, cong: 44, util: 22, cost: '低', score: 42, pick: '暂不部署',
-            why: '生产机架，持有原件即可；无 CXL 硬件时经 RDMA 读取副本' },
-          { id: 'R4', locality: 10, hot: 24, cong: 27, util: 18, cost: '中', score: 30, pick: '暂不部署',
-            why: '与该 KV 无明显交集，维持存量架构' }
-        ] },
+      decision: OFFLINE_DEC,
       ov: {
         locality: {
-          caption: '突发窗口内 R1/R2/R3 同时高频请求 → 判定：是 · 多机架突发共享',
-          res: '分流结果：多机架共享 → 复制分发策略（一次拷贝、多机架本地读），而非单点本地放置' },
-        gen: { res: '突发：同一份长上下文前缀在短时间内被 R1/R2/R3 同时高频请求（示意）' },
+          caption: '主力 R1/R3 自带 CXL 增量池 → 判定：本地 MHD 就近命中',
+          res: 'S1 走向：增量部署设计瞄准的主收益场景 —— 访问不离开主力机架'
+        }
+      } },
+    { id: 'S2', zh: '轻度溢流 · 回退原生池', en: 'NATIVE-FALLBACK',
+      brief: 'R2/R4 溢流 · 原生池余量充足 → 主动无视 CXL，回退底座',
+      kv: 'KV-002', prod: 'R2-N1', hot: 66, local: 12, dst: 'RDMA Pool-A（原生池）', tier: '原生 DRAM RDMA 池',
+      replica: '—', ver: 'V2', delay: '4.1 µs', load: '35%', occ: '0%',
+      r1score: 86, r3score: 64, r3cong: 86,
+      place: 'pool', pool: { used: 8, cong: 35, note: '余量充足' },
+      jq: '原生 RDMA 池水位是否击穿代价阈值？',
+      jyes: '是 · 水位击穿 → 兜底借用远端增量池（S3 走向）',
+      jno: '否 · 余量充足 → 回退原生池，主动无视 CXL（本情景）',
+      jpick: 'no',
+      verdict: '是 · 主力 R2（RDMA-only）· 水位未击穿',
+      vdWhy: 'Cost(X)=4.1µs vs Cost(Y)=5.6µs · 原生池水位 57% 拥塞 35% —— 有 CXL 但不值得用',
+      mx: { rica: '4.1 µs', naive: '5.6 µs', gain: '-27%', cap: '0%', xr: '0 GB/s',
+        basis: '远端 MHD = 跨机架转发 + 远端访存叠加，比原生池更慢 → 调度器主动无视增量硬件（示意，非实测）',
+        fn: '* 朴素策略 = 无视原生池水位，一律推远端 CXL · 示意，非实测' },
+      cands: [
+        { id: 'A', t: '原生 RDMA Pool', to: 'POOL', ok: true, why: '水位 57% · 余量充足 · 4.1 µs' },
+        { id: 'C', t: '远端 R1 MHD', to: 'R1-X', ok: false, why: '转发 + 访存叠加 · 5.6 µs 更慢' },
+        { id: 'B', t: '复制到 CXL', to: 'R3', ok: false, why: '单源溢流 · 无共享收益' }
+      ],
+      deploy: ['R1', 'R3'],
+      decision: OFFLINE_DEC,
+      ov: {
+        locality: {
+          caption: '主力 R2 无 CXL 硬件 · Cost(Y)=5.6µs > Cost(X)=4.1µs → 判定：回退原生池',
+          res: 'S2 走向：增量硬件摆在那里，但系统主动无视它 —— 原生底座足够'
+        },
         decide: {
-          caption: '突发共享 → 全局证据一次采齐，R1+R3 同批部署，副本就近放入各机架 MHD',
-          why: '多机架共享热度 88+、Spine 拥塞 91%：R1/R3 评分 {r1score}/{r3score} 并行上线；多方同时读 → 复制优于迁移',
-          res: 'T1 执行后，{kv} 以副本形式分别落入 R1-MHD-1 与 R3-MHD-3，原件保留在 RDMA Pool' },
+          caption: '离线增量决策已落板（硬件固定）· 本情景 KV 直写原生池',
+          why: '部署是离线一次性决策，不随单个 KV 变化；运行时走哪个池由 04 判定的水位与代价决定',
+          res: 'T1 执行后硬件就位，但 {kv} 直写 RDMA Pool-A，不碰 CXL'
+        },
         access: {
-          caption: '各机架从本机架 MHD 副本读取：R1/R3 命中 0.9–1.1 µs，R2 经 RDMA 读取副本',
-          res: '三个机架的访问被本地副本吸收，Spine 链路压力从 91% 显著回落' },
+          caption: 'R2 经 RDMA 访问原生池 · 4.1 µs —— 水位未击穿时这就是最优路径',
+          res: '增量硬件在场但不参与：不新增跨机架转发，原生池余量吸收溢流'
+        },
+        migrate: {
+          caption: '无迁移 / 无复制：溢流 KV 留在原生池',
+          res: '只有原生体系排队延迟击穿阈值，把 KV 搬进远端 MHD 这笔投资才划算'
+        },
+        evict: { res: '热度回落 → Directory 标记 invalid，原生池容量回收复用' }
+      } },
+    { id: 'S3', zh: '原生池过载 · 增量兜底', en: 'OVERLOAD-BAILOUT',
+      brief: 'R2/R4 溢流 · 原生池耗尽拥塞爆炸 → Cost(Y) 反超，借用增量池',
+      kv: 'KV-003', prod: 'R2-N1', hot: 74, local: 12, dst: 'R1 / MHD-1（远端增量池）', tier: 'CXL MHD（过载兜底）',
+      replica: '—', ver: 'V3', delay: '4.9 µs', load: '88%', occ: '61%',
+      r1score: 86, r3score: 64, r3cong: 86,
+      place: 'remote-mhd', pool: { used: 13, cong: 88, note: '过载' },
+      jq: '原生 RDMA 池水位是否击穿代价阈值？',
+      jyes: '是 · Cost(X)=7.8µs 爆炸 → 借增量池兜底（本情景）',
+      jno: '否 · 余量充足 → 回退原生池（S2 走向）',
+      jpick: 'yes',
+      verdict: '是 · 主力 R2（RDMA-only）· 原生池过载',
+      vdWhy: '原生池水位 93% 拥塞 88% · Cost(X)=7.8µs 击穿阈值 → Cost(Y)=4.9µs 反超，兜底激活',
+      mx: { rica: '4.9 µs', naive: '7.8 µs', gain: '-37%', cap: '9%', xr: '一次性 16 GB',
+        basis: '原生池排队延迟爆炸抬升 Cost(X) → 远端 MHD 叠加开销后依然更优；增量池是过载兜底而非优先选项（示意，非实测）',
+        fn: '* 朴素策略 = 无视水位，硬挤过载的原生池 · 示意，非实测' },
+      cands: [
+        { id: 'C', t: '远端 R1 MHD', to: 'R1-MHD-1', ok: true, why: 'Cost(Y)=4.9µs < Cost(X)=7.8µs' },
+        { id: 'A', t: '原生 RDMA Pool', to: 'POOL', ok: false, why: '水位 93% · 排队 7.8 µs 击穿阈值' },
+        { id: 'B', t: '复制到 CXL', to: 'R3', ok: false, why: '单次溢流 · 迁移即可，无需副本' }
+      ],
+      deploy: ['R1', 'R3'],
+      decision: OFFLINE_DEC,
+      ov: {
+        locality: {
+          caption: '主力 R2 无 CXL · 原生池水位 93% 拥塞 88% → 判定：兜底借用远端增量池',
+          res: 'S3 走向：不是"想蹭 CXL"，是原生体系扛不住 —— 增量池做兜底加速'
+        },
+        decide: {
+          caption: '离线增量决策已落板（硬件固定）· 本情景 KV 兜底写入远端增量池',
+          res: 'Cost(X)=7.8µs 击穿阈值 → {kv} 经跨机架 RDMA 写入 R1-MHD-1'
+        },
+        access: {
+          caption: 'R2 经 Leaf-Spine RDMA 跨机架读取 R1-MHD-1 · 4.9 µs',
+          why: '跨机架转发 + 远端访存叠加的兜底代价，仍优于挤爆的原生池（7.8 µs）',
+          res: '延迟 4.9 µs —— 劣于 S1 本地 0.9 µs，但优于过载原生池；增量池只是兜底'
+        },
+        migrate: {
+          caption: '单次溢流 → 迁移而非复制：{kv} 迁入 R1-MHD-1，原生池压力缓释',
+          res: '迁移完成后原生池水位回落；若过载持续，长期托管将演化成 S4 形态'
+        },
+        evict: { res: '原生池水位回落 → {kv} 迁回 RDMA Pool，增量池容量让位给新的兜底请求' }
+      } },
+    { id: 'S4', zh: '多机架长期共享热点', en: 'SHARED-HOTSPOT',
+      brief: 'R1–R4 持续并发读同一 KV · 长期托管增量池，复制分发',
+      kv: 'KV-004', prod: 'R1-N1', hot: 93, local: 55, dst: 'R1-MHD-1 + R3-MHD-3（副本）', tier: 'CXL MHD（长期托管）',
+      replica: 'R1-MHD-1 · R3-MHD-3', ver: 'V4', delay: '1.1 µs', load: '62%', occ: '78%',
+      r1score: 86, r3score: 64, r3cong: 86,
+      place: 'copy', pool: { used: 9, cong: 58, note: '中度' },
+      jq: '是否为跨机架长期共享热点？',
+      jyes: '是 · 复用周期长 → 一次复制分发，长期托管增量池（本情景）',
+      jno: '否 · 单次溢流 → 按原生池水位判定（S2 / S3 走向）',
+      jpick: 'yes',
+      verdict: '是 · 多机架长期共享热点',
+      vdWhy: 'R1/R3 与 R2/R4 持续并发读 · 复用周期长 · 与 S3 单次溢流兜底不同：关心反复访问的平均收益',
+      mx: { rica: '1.1 µs', naive: '4.3 µs', gain: '-74%', cap: '18%', xr: '一次性 32 GB',
+        basis: '长期共享热点 → 一次复制分发，R1/R3 本地命中吸收大部分读流量；R2/R4 偶发远端读 · 复用收益随时间累积（示意，非实测）' },
+      cands: [
+        { id: 'A', t: '副本 → R1 CXL', to: 'R1-MHD-1', ok: true, why: 'R1 持续请求 · 副本落地' },
+        { id: 'B', t: '副本 → R3 CXL', to: 'R3-MHD-3', ok: true, why: 'R3 持续请求 · 副本落地' },
+        { id: 'C', t: '原生 RDMA Pool', to: 'POOL', ok: false, why: '跨机架读风暴 · 持续压 Spine' }
+      ],
+      deploy: ['R1', 'R3'],
+      decision: OFFLINE_DEC,
+      ov: {
+        locality: {
+          caption: 'R1–R4 持续并发请求同一 KV · 复用周期长 → 判定：长期共享热点',
+          res: 'S4 走向：不是单次溢流救急（S3），而是长期托管 —— 复制分发到增量池'
+        },
+        gen: { res: '长期共享：同一段多轮会话前缀被 R1–R4 持续并发请求（示意）' },
+        decide: {
+          caption: '离线增量决策已落板（硬件固定）· 本情景 KV 复制托管增量池',
+          res: '{kv} 原件落入 R1-MHD-1，并复制副本至 R3-MHD-3'
+        },
+        access: {
+          caption: 'R1/R3 本机架命中副本 0.9–1.1 µs · R2/R4 偶发经 RDMA 远端读',
+          res: '大部分读被机架内 CXL 吸收，Spine 只承载偶发远端读'
+        },
         migrate: {
           caption: '复制优先：共享 KV 在 R1/R3 MHD 各存一份副本，原件保留（多读场景不宜迁移）',
-          res: '副本落位：R1-MHD-1 + R3-MHD-3 · Directory 版本 {ver} 记录多副本映射' },
-        evict: { res: '突发结束后副本热度回落：按 LRU 先回收副本，原件下沉 RDMA Pool' }
-      } },
-    { id: 'S3', zh: '生产 = 访问机架', en: 'PROD-EQ-ACC', brief: '均在 RDMA-only 机架 → 不部署远端 CXL',
-      kv: 'KV-003', prod: 'R2-N1', hot: 78, local: 85, dst: 'RDMA Pool-A', tier: 'RDMA 内存池',
-      peer: 'R2-N3', peerLoc: 85, replica: '—', ver: 'V3', delay: '4.1 µs', load: '33%', occ: '24%',
-      verdict: '是 · 主力 R2（RDMA-only）', vdWhy: '请求分布 85% 集中 R2 · 热度 78 · 但主力机架无 CXL 硬件',
-      mx: { rica: '4.1 µs', naive: '5.6 µs', gain: '-27%', cap: '0%', xr: '1.1 GB/s',
-        basis: '远端 MHD = 跨机架转发 + 远端读取叠加，比原生 RDMA 更慢 → 主动放弃远端 CXL（示意，非实测）' },
-      cands: [
-        { id: 'D', t: 'RDMA Pool', to: 'POOL', ok: true, why: '生产=访问重合 · 原生路径最优' },
-        { id: 'C', t: '远端 R1 MHD', to: 'R1-X', ok: false, why: '跨机架转发 + 读取叠加更慢' },
-        { id: 'B', t: '复制到 CXL', to: 'R3', ok: false, why: '访问不离开 R2 · 无收益' }
-      ],
-      deploy: [],
-      decision: {
-        note: '生产与访问重合在同一 RDMA-only 机架（示意，非实测）',
-        racks: [
-          { id: 'R2', locality: 85, hot: 78, cong: 33, util: 22, cost: '—', score: 41, pick: '不部署',
-            why: '访问 85% 集中在 R2，但生产=访问重合：数据留在 RDMA Pool 即可，远端 CXL 无收益' },
-          { id: 'R1', locality: 8, hot: 24, cong: 40, util: 63, cost: '低', score: 25, pick: '暂不部署',
-            why: '几乎不访问该 KV，为它部署 CXL 属于无效投入' },
-          { id: 'R3', locality: 5, hot: 18, cong: 30, util: 48, cost: '低', score: 20, pick: '暂不部署',
-            why: '同上，无访问收益' },
-          { id: 'R4', locality: 4, hot: 12, cong: 29, util: 18, cost: '中', score: 15, pick: '暂不部署',
-            why: '无访问、成本中等，维持存量架构' }
-        ] },
-      ov: {
-        locality: {
-          caption: '请求 85% 集中在 R2，但 R2 是 RDMA-only 机架 → 判定：是 · 主力无 CXL 底座',
-          res: '分流结果：主力明确但无 CXL 硬件 → 远端 CXL 无收益，走原生 RDMA 路径' },
-        gen: { res: '生产与访问都在 R2（RDMA-only 机架）—— 数据没有离开集群远端池的理由' },
-        decide: {
-          caption: '决策矩阵：访问高度集中但生产=访问重合 → 判定不部署远端 CXL',
-          act: 'Placement Controller 汇总四机架画像：访问 85% 集中在 R2，而 R2 是 RDMA-only 机架',
-          obj: '全局决策矩阵 · R2 41 / 其余 ≤ 25 · 判定：维持全 RDMA',
-          why: '把 KV 放进其他机架的 CXL MHD，只会把"本机架命中"变成"跨机架 RDMA"——远端 CXL 对生产=访问重合的 KV 无收益',
-          res: 'T0 维持：全 RDMA 架构不变，{kv} 保留在 RDMA Pool-A · 部署时间轴停在 T0' },
-        access: {
-          caption: 'R2 节点经 RNIC + Leaf-Spine 访问 RDMA Pool · 4.1 µs —— 本情景的正确路径',
-          act: 'R2 各节点经 RNIC 直达远端内存池，访问全部在存量 RDMA 路径完成',
-          why: '不部署决策的正确性体现在：没有为无收益的 KV 支付增量硬件成本',
-          res: '延迟 4.1 µs（基线水平）—— 宁可接受基线延迟，也不做无效部署' },
-        migrate: {
-          caption: '无迁移 / 复制：访问局部性 85% 且无跨机架共享，数据原地保留',
-          act: '本情景不触发迁移或复制 —— Controller 持续观察访问主体是否漂移',
-          obj: '{kv} · 位置不变 · RDMA Pool-A',
-          why: '迁移/复制的触发条件是"访问主体变化"或"多机架共享"，本情景两者皆无',
-          res: '若未来访问主体漂移到 CXL 机架，将重新进入 03 决策评估' },
-        evict: { res: '热度回落 → Directory 标记 invalid，RDMA Pool 容量回收复用' }
-      } },
-    { id: 'S4', zh: '多机架均匀', en: 'UNIFORM', brief: '无明显主力机架 → 保留 RDMA 存储',
-      kv: 'KV-004', prod: 'R3-N2', hot: 52, local: 24, dst: 'RDMA Pool-A', tier: 'RDMA 内存池',
-      peer: 'R1-N3', peerLoc: 22, replica: '—', ver: 'V4', delay: '4.1 µs', load: '33%', occ: '24%',
-      verdict: '否 · 无主力机架', vdWhy: '请求分布均匀（各 ≤26%）· 无集中热点 · 访问机架集合 = 全部机架',
-      mx: { rica: '4.1 µs', naive: '4.4 µs', gain: '-7%', cap: '0%', xr: '2.0 GB/s',
-        basis: '均匀访问下复制收益≈0、容量浪费 → 保留 RDMA，稀缺 CXL 预算留给高价值 KV（示意，非实测）' },
-      cands: [
-        { id: 'D', t: 'RDMA Pool', to: 'POOL', ok: true, why: '全网共享 · 单一份' },
-        { id: 'B', t: '复制副本', to: 'R1', ok: false, why: '收益≈0 · 容量浪费' },
-        { id: 'C', t: '远端 CXL', to: 'R3-X', ok: false, why: '无主力机架 · 不就近' }
-      ],
-      deploy: [],
-      decision: {
-        note: '访问均匀散布 · 无明显主力访问机架（示意，非实测）',
-        racks: [
-          { id: 'R1', locality: 24, hot: 52, cong: 41, util: 63, cost: '低', score: 34, pick: '暂不部署',
-            why: '均匀访问下部署只能服务 1/4 请求，收益摊薄、回收周期拉长' },
-          { id: 'R2', locality: 26, hot: 48, cong: 33, util: 22, cost: '低', score: 30, pick: '暂不部署',
-            why: '同上 —— 无主力机架意味着任何放置都不"就近"' },
-          { id: 'R3', locality: 25, hot: 50, cong: 30, util: 48, cost: '低', score: 28, pick: '暂不部署',
-            why: 'RDMA Pool 天然全网共享，均匀访问正是它的主场' },
-          { id: 'R4', locality: 22, hot: 45, cong: 29, util: 18, cost: '中', score: 22, pick: '暂不部署',
-            why: '维持存量架构，观察访问形态是否收敛后再评估' }
-        ] },
-      ov: {
-        locality: {
-          caption: '四机架访问各 ≤ 26%，无任何收敛点 → 判定：否 · 无主力访问机架',
-          res: '分流结果：无主力 → 任何放置都不"就近"，保留 RDMA 全网共享' },
-        gen: { res: '访问主体均匀散布在四个机架（各 ≤ 26%）—— 无明显主力访问机架' },
-        decide: {
-          caption: '决策矩阵：四机架评分 34/30/28/22 全部低于阈值 → 保留 RDMA 存储',
-          act: 'Placement Controller 汇总四机架画像：访问均匀散布，没有任何机架形成局部性热点',
-          obj: '全局决策矩阵 · 全部 < 35 · 判定：维持全 RDMA',
-          why: '没有主力机架 → 任何机架部署 CXL 都只能服务 1/4 的访问；RDMA Pool 天然全网共享，均匀访问正是它的主场',
-          res: 'T0 维持：全 RDMA 架构不变 · 部署时间轴停在 T0' },
-        access: {
-          caption: '四机架经 Leaf-Spine 均匀访问 RDMA Pool · 4.1 µs · 无热点链路',
-          act: '四个机架的访问在 Spine 上均匀分摊（ECMP），链路负载 33% 无拥塞',
-          why: '存量 RDMA 架构恰好匹配"均匀访问"的负载形态 —— 这正是它被设计出来的场景',
-          res: '全网共享一份数据，避免任何副本一致性开销' },
-        migrate: {
-          caption: '无迁移 / 复制：均匀访问下任何"就近化"都会制造新的不均匀',
-          act: '本情景不触发迁移或复制',
-          obj: '{kv} · 全网单一份 · RDMA Pool-A',
-          why: '把数据搬向任何一个机架都会让其余三个机架的访问变远',
-          res: '保持单一份 + 全网可达，是均匀访问形态下的最优放置' },
-        evict: { res: '热度回落 → Directory 标记 invalid，RDMA Pool 容量回收复用' }
+          res: '副本落位：R1-MHD-1 + R3-MHD-3 · Directory 版本 {ver} 记录多副本映射'
+        },
+        evict: { res: '复用热度回落 → 先回收副本，原件下沉 RDMA Pool' }
       } }
   ];
 
-  /* ── 七阶段 ── */
+  /* ── 八阶段 ── */
   var STAGES = [
     {
       id: 'gen', n: '01', zh: '推理生成', en: 'GENERATION',
@@ -233,22 +244,22 @@ window.FLOW = (function () {
       anim: { type: 'collect' }
     },
     {
-      id: 'decide', n: '03', zh: '存储决策', en: 'PLACEMENT',
-      caption: 'Controller 综合全网拓扑 / 历史热度 / 拥塞 / 利用率 / 成本 全局评估 → 一次决策，R1+R3 同批部署',
-      act: 'Placement Controller 汇总四机架画像（阶段 02 已一次采齐）：局部性、历史热度、拥塞、利用率、成本，加权评分后同时排定 R1 与 R3',
-      obj: '全局决策矩阵 · R1 {r1score} / R3 {r3score} · 两机架并行上线 CXL Switch + 共享 MHD',
-      why: '证据一次采齐就没有分批等待的理由：R1 局部性 {local}% 评分最高；R3 的共享热度与 Spine 拥塞 {r3cong}% 决策时已可见，一并部署',
-      res: 'T1 执行：R1 与 R3 同时出现 CXL Switch 与共享 MHD，各接入 N1/N2；{kv} 写入 R1-MHD-1',
+      id: 'decide', n: '03', zh: '存储决策', en: 'PROVISIONING',
+      caption: '离线增量决策（前提已落板）：全网证据一次采齐 → R1+R3 同批部署 · 硬件固定',
+      act: 'Placement Controller 汇总四机架长期画像（阶段 02 已一次采齐）：局部性、历史热度、拥塞、利用率、成本，加权评分后同时排定 R1 与 R3',
+      obj: '离线部署矩阵 · R1 {r1score} / R3 {r3score} · 两机架并行上线 CXL Switch + 共享 MHD',
+      why: '部署是离线一次性决策，不随单个 KV 变化；运行时走哪个池，由 04 判定的水位与代价决定',
+      res: 'T1 执行：R1 与 R3 同时上线 CXL Switch 与共享 MHD，各接入 N1/N2 —— 硬件前提就此焊死',
       metrics: { 延迟: '—', 链路: '{load}', 占用: '{occ}' },
       anim: { type: 'decide' }
     },
     {
       id: 'locality', n: '04', zh: '局部性判定', en: 'LOCALITY JUDGE',
-      caption: '核心分叉点：这批 KV 有没有明确的主力访问机架？→ 判定：{verdict}',
-      act: 'Locality Judge 综合请求分布、热度周期与访问机架集合，回答核心问题：是否存在明确的主力访问机架',
-      obj: '{kv} · 请求分布 · 热度周期 · 访问机架集合 → 判定：{verdict}',
+      caption: '运行时核心分叉：主力在哪 · 原生池水位是否击穿阈值？→ 判定：{verdict}',
+      act: 'Locality Judge 结合请求分布与原生 RDMA 池水位，回答两个问题：访问主力在哪、Cost(X)（原生池）与 Cost(Y)（远端 MHD）谁更低',
+      obj: '{kv} · 请求分布 · 原生池水位 · Cost(X)/Cost(Y) → 判定：{verdict}',
       why: '{vdWhy}',
-      res: '所有放置策略从这个判定点开始分流：有主力且具备 CXL 底座 → 匹配 CXL 放置策略；否则 → 保留 RDMA',
+      res: '所有运行时放置从这一判定点分流：S1 本地命中 / S2 回退原生 / S3 兜底借用 / S4 复制托管',
       metrics: { 延迟: '—', 链路: '{load}', 占用: '{occ}' },
       anim: { type: 'locality' }
     },
@@ -264,17 +275,17 @@ window.FLOW = (function () {
     },
     {
       id: 'access', n: '06', zh: '数据访问', en: 'DATA ACCESS',
-      caption: '增量部署收益可见：本地 CXL 命中 0.9 µs，对比 T0 基线 RDMA 4.1 µs',
-      act: '本地：同机架节点经 CXL 从 {dst} 读取 KV；远端：另一机架仍必须走 Leaf-Spine 跨机架 RDMA',
+      caption: '增量部署主收益：本地 CXL 命中 0.9 µs，对比 T0 基线 RDMA 4.1 µs',
+      act: '本地：同机架节点经 CXL 从 {dst} 读取 KV；对照：未部署 CXL 的机架节点必须走 Leaf-Spine 跨机架 RDMA',
       obj: '{kv} · CXL 链路（T1 新增） · RDMA 链路（存量）',
-      why: 'T1 部署后本地访问可省掉跨机架往返：0.9 µs vs 基线 4.1 µs，这就是增量部署的直接收益',
-      res: 'KV Block 回填 GPU HBM；未部署 CXL 的 R2/R4 仍走 4.1 µs RDMA —— 评分 31/26 低于阈值，正是决策矩阵的取舍',
+      why: '主力自带增量池 → 本地访问省掉跨机架往返：0.9 µs vs 基线 4.1 µs',
+      res: 'KV Block 回填 GPU HBM；对照机架仍走 4.1 µs RDMA —— 水位驱动判定保证每笔放置都在当下最优池',
       metrics: { 延迟: '{delay}', 链路: '{load}', 占用: '{occ}' },
       anim: { type: 'access' }
     },
     {
       id: 'migrate', n: '07', zh: '迁移复制', en: 'MIGRATE / COPY',
-      caption: 'T2：硬件已就位，数据开始重分配——热点 KV 迁入本地 MHD、共享 KV 生成副本',
+      caption: 'T2：硬件已就位，数据开始重分配——热点迁入本地 MHD、共享 KV 生成副本',
       act: 'A. 迁移：{kv} 从旧位置搬向 {dst}；B. 复制：多机架共享的高频 KV 在对端生成副本',
       obj: '{kv}（原件）· 新副本 · Directory 版本 · T1 新上线的 R1/R3 MHD',
       why: '访问主体迁移时迁移更省容量；多机架共享时复制能避免跨机架往返',
@@ -296,18 +307,15 @@ window.FLOW = (function () {
 
   /* ── CXL 增量部署事件时间轴（与 KV 生命周期并行）──
    * T0 全 RDMA 基线 → T1 R1+R3 同批部署 → T2 KV 重分配
-   * 证据在阶段 02 一次采齐，阶段 03 一次决策、同批执行——
-   * 不存在"等 R3 的需求再出现才部署"的时间差。
+   * 部署是离线一次性决策（前提已落板）：四情景共享同一硬件前提。
    * START_LEVEL[i] = 第 i 个生命周期阶段开始时的部署等级（0-1），
    * T1 在阶段 03 内动画触发；T2 为数据行为，随阶段 07 动画呈现。 */
   var DEP = [
     { id: 'T0', zh: '全 RDMA 基线', brief: '0 / 4 CXL 机架 · 仅存量 RDMA + 远端内存池' },
-    { id: 'T1', zh: 'R1+R3 同批部署', brief: '2 / 4 · 全局证据一次采齐、一次决策，两机架并行上线' },
+    { id: 'T1', zh: 'R1+R3 同批部署', brief: '2 / 4 · 离线决策已落板 · 两机架并行上线' },
     { id: 'T2', zh: 'KV 重分配', brief: '热点迁入 MHD · 共享 KV 生成副本 · 利用率 63%' }
   ];
   var START_LEVEL = [0, 0, 0, 1, 1, 1, 1, 1];
-
-  /* ── 全局部署决策矩阵：已并入各场景的 decision 字段（随情景变化）── */
 
   /* ── 图例（全局视觉语义规范：源 KV / 副本 / CXL 通路 / 复制分发流 / RDMA / 否决候选 / 信令） ── */
   var LEGEND = [

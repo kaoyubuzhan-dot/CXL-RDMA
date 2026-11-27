@@ -284,16 +284,37 @@ window.FLOW_SCENE = (function () {
   function drawPool() {
     var p = L.pool;
     var g = el('g', { class: 'pool', 'data-pick': 'POOL' }, root.boxes);
-    el('rect', { x: p.x, y: p.y, width: p.w, height: p.h, rx: 2, class: 'fx-pool' }, g);
+    root.poolRect = el('rect', { x: p.x, y: p.y, width: p.w, height: p.h, rx: 2, class: 'fx-pool' }, g);
     txt('RDMA  REMOTE  MEMORY  POOL', { x: p.x + 16, y: p.y + 24, class: 'fx-t1' }, g);
     txt('DRAM / 全闪存 · 4 TB · 仅经 RNIC + Leaf-Spine 可达', { x: p.x + 16, y: p.y + 40, class: 'fx-t3' }, g);
     txt('POOL-A', { x: p.x + p.w - 16, y: p.y + 24, class: 'fx-t2', 'text-anchor': 'end' }, g);
     txt('SLA · 4.1 µs', { x: p.x + p.w - 16, y: p.y + 40, class: 'fx-t3', 'text-anchor': 'end' }, g);
+    root.poolSlots = [];
     for (var i = 0; i < 14; i++) {
-      el('rect', {
+      root.poolSlots.push(el('rect', {
         x: p.x + 16 + i * 54, y: p.y + 52, width: 44, height: 12, rx: 1,
         class: 'fx-pool-slot' + (i < 4 ? ' is-used' : '')
-      }, g);
+      }, g));
+    }
+    /* 原生池水位状态条：位于池下方，不被 03/04 决策浮层遮挡，全程可见 */
+    var sg = el('g', { class: 'pool-stat' }, root.boxes);
+    el('rect', { x: p.x + 2, y: p.y + p.h + 8, width: p.w - 4, height: 20, rx: 2, class: 'fx-pool-stat-bg' }, sg);
+    root.poolStatT = txt('POOL 水位 4/14 · 拥塞 24% · 水位正常（示意）',
+      { x: p.x + 14, y: p.y + p.h + 22, class: 'fx-pool-stat' }, sg);
+  }
+
+  /* ── 原生 RDMA 池水位状态（S2/S3 核心叙事）：
+     拥塞 ≥ 70% 视为过载：池框高亮橙红、状态条变红 —— S3 兜底激活的视觉前提 ── */
+  function setPoolState(p) {
+    if (!p || !root.poolSlots) return;
+    var used = Math.max(0, Math.min(14, p.used | 0));
+    var cong = Math.max(0, Math.min(100, p.cong | 0));
+    var sat = cong >= 70;
+    root.poolSlots.forEach(function (s, i) { s.classList.toggle('is-used', i < used); });
+    if (root.poolRect) root.poolRect.classList.toggle('is-sat', sat);
+    if (root.poolStatT) {
+      root.poolStatT.textContent = 'POOL 水位 ' + used + '/14 · 拥塞 ' + cong + '% · ' + p.note + '（示意）';
+      root.poolStatT.setAttribute('fill', sat ? '#f0785a' : '#7c93a4');
     }
   }
 
@@ -573,57 +594,94 @@ window.FLOW_SCENE = (function () {
     }, 2400);
   }
 
+  /* 跨机架走廊 y 坐标（Fabric 下沿与机架顶部之间的水平通道） */
+  function corridorY() { return L.fabric.y + L.fabric.h + 8; }
+
+  /* ── 03 存储决策：离线增量部署（前提已落板，R1+R3 同批上线）+
+     KV 初始放置随情景分派（place: mhd / pool / remote-mhd / copy）── */
   function animDecide(sc) {
     var dep = (sc.deploy && sc.deploy.length) ? sc.deploy : [];
     card('profiler', true, '局部性 ' + sc.local + '%');
     later(function () {
       decisionOverlay(sc.decision);
-      card('place', true, '全局评估中…');
+      card('place', true, '离线决策执行中…');
     }, 200);
-    if (dep.length) {
-      /* 部署型场景：R1+R3 依决策矩阵同批上线，KV 写入 R1-MHD-1 */
-      dep.forEach(function (rid, i) {
-        var row = (sc.decision && sc.decision.racks.filter(function (r) { return r.id === rid; })[0]) || { score: '?' };
-        later(function () {
-          ring(rid, true);
-          card('topo', true, 'CXL 可达');
-          callout(rackX(rackIdxOf(rid)) + 4, 78, rid + ' · 选中 · 评分 ' + row.score, null, '#53e3c4');
-        }, 400 + i * 900);
-      });
+    /* T1：R1+R3 同批上线（离线决策矩阵一次判定，无分批时间差） */
+    dep.forEach(function (rid, i) {
+      var row = (sc.decision && sc.decision.racks.filter(function (r) { return r.id === rid; })[0]) || { score: '?' };
       later(function () {
-        dep.slice(1).forEach(function (rid) { ring(rid, false); });
-        card('place', true, '-> ' + sc.dst);
-        var p = nodeAnchor(sc.prod.split('-')[0], sc.prod.split('-')[1]);
-        var m = mhdAnchor('R1', 'MHD-1');
-        var bx = busXOf(0);
-        var t = token('kv', { x: p.x, y: p.y }, { size: 12, gold: true });
-        move(t, [{ x: p.x, y: p.y }, { x: bx, y: p.y }, { x: bx, y: m.y }, { x: m.x + 26, y: m.y }],
-          { dur: 1600, keep: true });
-        later(function () { hl('.mhd[data-pick="R1-MHD-1"] .fx-mhd', 'is-hot'); }, 1600);
-      }, 2400);
-    } else {
-      /* 不部署型场景（S3/S4）：决策维持全 RDMA，KV 保留 RDMA Pool */
+        ring(rid, true);
+        card('topo', true, 'CXL 可达');
+        callout(rackX(rackIdxOf(rid)) + 4, 78, rid + ' · 选中 · 评分 ' + row.score, null, '#53e3c4');
+      }, 400 + i * 900);
+    });
+    later(function () { dep.slice(1).forEach(function (rid) { ring(rid, false); }); }, 2200);
+
+    var pp = sc.prod.split('-');
+    var p = nodeAnchor(pp[0], pp[1]);
+    var rtF = rackTop(rackIdxOf(pp[0]));
+    var m1 = mhdAnchor('R1', 'MHD-1'), bx1 = busXOf(0);
+    var pool = poolAnchor();
+    var place = sc.place || 'mhd';
+
+    if (place === 'pool') {
+      /* S2：原生池水位未击穿 → 直写原生池，主动无视 CXL */
       later(function () {
-        card('place', true, '维持全 RDMA');
-        var rkId = sc.prod.split('-')[0];
-        var ri = rackIdxOf(rkId);
-        var p = nodeAnchor(rkId, sc.prod.split('-')[1]);
-        var rt = rackTop(ri);
-        var pool = poolAnchor();
-        var pts = [{ x: p.x, y: p.y }, { x: rt.x, y: rt.y }, { x: rt.x, y: L.fabric.y + L.fabric.h + 8 },
-                   { x: pool.x + 150, y: L.fabric.y + L.fabric.h + 8 }, { x: pool.x + 150, y: pool.y - 8 }];
-        pulseLink('lnk-rdma-' + (ri + 1), 'is-flow', 2600);
+        card('place', true, '-> RDMA Pool');
+        var pts = [{ x: p.x, y: p.y }, { x: rtF.x, y: rtF.y }, { x: rtF.x, y: corridorY() },
+                   { x: pool.x + 150, y: corridorY() }, { x: pool.x + 150, y: pool.y - 8 }];
+        pulseLink('lnk-rdma-' + (rackIdxOf(pp[0]) + 1), 'is-flow', 2600);
         pulseLink('lnk-pool', 'is-flow', 2600);
         var t = token('kv', { x: p.x, y: p.y }, { size: 12 });
         move(t, pts, {
           dur: 1800, keep: true, onDone: function () {
             callout(pool.x + 80, pool.y - 40, sc.kv + ' → RDMA Pool',
-              '决策：不部署远端 CXL · 维持全 RDMA', '#5f9fe8');
+              '水位未击穿 · 回退原生池 · 主动无视 CXL', '#5f9fe8');
           }
         });
-      }, 1400);
+      }, 2400);
+    } else if (place === 'remote-mhd') {
+      /* S3：原生池过载 → 兜底写入远端 R1-MHD-1（跨机架 RDMA 传输） */
+      later(function () {
+        card('place', true, '-> R1-MHD-1（兜底）');
+        var pts = [{ x: p.x, y: p.y }, { x: rtF.x, y: rtF.y }, { x: rtF.x, y: corridorY() },
+                   { x: rackX(0) + L.rack.w / 2, y: corridorY() },
+                   { x: rackX(0) + L.rack.w / 2, y: rackTop(0).y },
+                   { x: bx1, y: rackTop(0).y }, { x: bx1, y: m1.y }, { x: m1.x + 26, y: m1.y }];
+        pulseLink('lnk-rdma-' + (rackIdxOf(pp[0]) + 1), 'is-flow', 2800);
+        var t = token('kv', { x: p.x, y: p.y }, { size: 12, gold: true });
+        move(t, pts, {
+          dur: 2200, keep: true, onDone: function () {
+            hl('.mhd[data-pick="R1-MHD-1"] .fx-mhd', 'is-hot');
+            callout(pool.x + 80, pool.y - 40, '原生池过载 · 兜底写入远端 MHD',
+              'Cost(X)=7.8µs 击穿 → Cost(Y)=4.9µs 反超', '#f0785a');
+          }
+        });
+      }, 2400);
+    } else {
+      /* S1（mhd）：KV 写入 R1-MHD-1 · S4（copy）：写入原件 + 复制副本到 R3 */
+      later(function () {
+        card('place', true, '-> ' + sc.dst);
+        var t = token('kv', { x: p.x, y: p.y }, { size: 12, gold: true });
+        move(t, [{ x: p.x, y: p.y }, { x: bx1, y: p.y }, { x: bx1, y: m1.y }, { x: m1.x + 26, y: m1.y }],
+          { dur: 1600, keep: true });
+        later(function () { hl('.mhd[data-pick="R1-MHD-1"] .fx-mhd', 'is-hot'); }, 1600);
+      }, 2400);
+      if (place === 'copy') {
+        later(function () {
+          var m3 = mhdAnchor('R3', 'MHD-3'), bx3 = busXOf(2);
+          var pts = [{ x: m1.x + 26, y: m1.y }, { x: bx1, y: m1.y }, { x: bx1, y: corridorY() },
+                     { x: bx3, y: corridorY() }, { x: bx3, y: m3.y }, { x: m3.x + 26, y: m3.y }];
+          var cp = el('path', { d: pth(pts), class: 'fx-copy-path' }, root.toks);
+          later(function () { if (cp.parentNode) cp.parentNode.removeChild(cp); }, 3200);
+          var t = token('copy', { x: pts[0].x, y: pts[0].y }, { size: 11, label: 'COPY ×1' });
+          move(t, pts, { dur: 1700, keep: true, onDone: function () {
+            hl('.mhd[data-pick="R3-MHD-3"] .fx-mhd', 'is-hot');
+          } });
+        }, 3200);
+      }
     }
-    later(function () { card('place', false, dep.length ? 'PLACED' : 'NO-DEPLOY'); }, 4600);
+    later(function () { card('place', false, 'PLACED'); }, 4900);
   }
 
   /* ── 04 局部性判定（核心分叉点）：
@@ -649,15 +707,15 @@ window.FLOW_SCENE = (function () {
     el('rect', { x: x, y: y, width: w, height: hh, rx: 2, class: 'fx-dec-box' }, g);
     el('rect', { x: x, y: y, width: 2, height: hh, fill: '#a38bf2' }, g);
     txt('局部性判定 · LOCALITY JUDGE', { x: x + 14, y: y + 20, class: 'fx-t2' }, g);
-    txt('所有放置策略从这个判定点开始分流', { x: x + w - 14, y: y + 20, class: 'fx-t4', 'text-anchor': 'end', fill: '#8fa6b5' }, g);
-    var qy = y + 32, qh = 34, qx = x + 16, qw = 236;
+    txt('原生池水位 × 访问局部性 · 双重判定', { x: x + w - 14, y: y + 20, class: 'fx-t4', 'text-anchor': 'end', fill: '#8fa6b5' }, g);
+    var qy = y + 32, qh = 34, qx = x + 16, qw = 300;
     el('rect', { x: qx, y: qy, width: qw, height: qh, rx: 2, class: 'fx-branch-q' }, g);
-    txt('这批 KV 是否存在明确的主力访问机架？', { x: qx + 12, y: qy + 22, class: 'fx-t3' }, g);
-    /* 分支：是（有主力） / 否（无主力），本情景走向高亮 */
-    var byY = qy, bnY = qy + 38, bx0 = qx + qw + 56, bw = w - (bx0 - x) - 16;
-    var yesTxt = '是 · 有主力 → ' + sc.verdict.replace(/^是 · /, '') + ' → 按 CXL / RDMA 收益匹配放置';
-    var noTxt = '否 · 无主力 → RDMA Pool 全网共享（S4 情景走向）';
-    var isYes = sc.verdict.indexOf('否') !== 0;
+    txt(sc.jq || '主力访问机架是否自带 CXL 增量池？', { x: qx + 12, y: qy + 22, class: 'fx-t3' }, g);
+    /* 分支：是 / 否，本情景走向（jpick）高亮 —— 判定文本随情景数据驱动 */
+    var byY = qy, bnY = qy + 38, bx0 = qx + qw + 44, bw = w - (bx0 - x) - 16;
+    var yesTxt = sc.jyes || ('是 · ' + sc.verdict);
+    var noTxt = sc.jno || '否 · 回退原生 RDMA Pool';
+    var isYes = sc.jpick !== 'no';
     el('path', { d: 'M' + (qx + qw) + ',' + (qy + qh / 2) + ' C' + (qx + qw + 28) + ',' + (qy + qh / 2) +
       ' ' + (qx + qw + 28) + ',' + (byY + 15) + ' ' + bx0 + ',' + (byY + 15),
       class: 'fx-branch-link' + (isYes ? ' is-act' : '') }, g);
@@ -674,7 +732,9 @@ window.FLOW_SCENE = (function () {
   }
 
   function animQuery(sc) {
-    var n = nodeAnchor('R1', 'N2');
+    /* 查询发起方随情景（S1 为主力 R1；S2/S3 为溢流发起方 R2；S4 为 R1） */
+    var pp = sc.prod.split('-');
+    var n = nodeAnchor(pp[0], pp[1]);
     var c = L.ctrl, x1 = c.x + c.w / 2, y1 = c.y + 42 + 4 * 84 + 35;
     var q = [{ x: n.x, y: n.y }, { x: n.x, y: n.y - 42 }, { x: x1, y: n.y - 42 }, { x: x1, y: y1 }];
     var t1 = token('ctl', { x: q[0].x, y: q[0].y }, { size: 8, label: 'QUERY' });
@@ -688,7 +748,8 @@ window.FLOW_SCENE = (function () {
     });
     later(function () { card('dir', false, sc.ver || 'V1'); }, 3200);
     later(function () { drawCandidates(sc); }, 600);
-    callout(n.x - 56, n.y + 62, '候选评估 · NV Directory + Cost Evaluator', '算收益，不是有硬件就选', '#91e4ff');
+    callout(rackX(rackIdxOf(pp[0])) - 10, L.rack.y - 26, '候选评估 · KV Directory + Cost Evaluator',
+      '算收益，不是有硬件就选', '#91e4ff');
   }
 
   /* ── 候选评估链路：选中 = 主色实线；被放弃 = 灰虚线 + 叉（可开关） ── */
@@ -755,41 +816,57 @@ window.FLOW_SCENE = (function () {
   }
 
   function animAccess(sc) {
-    var dep = (sc.deploy && sc.deploy.length) ? sc.deploy : [];
+    var place = sc.place || 'mhd';
+    var pp = sc.prod.split('-');
+    var rkId0 = pp[0], ri0 = rackIdxOf(rkId0);
+    var p0 = nodeAnchor(rkId0, pp[1]);
+    var rt0 = rackTop(ri0);
+    var pool0 = poolAnchor();
+    var m1 = mhdAnchor('R1', 'MHD-1'), bx1 = busXOf(0);
 
-    /* 不部署型场景（S3/S4）：纯 RDMA 访问 —— 这就是本情景的正确路径 */
-    if (!dep.length) {
-      var rkId0 = sc.prod.split('-')[0];
-      var ri0 = rackIdxOf(rkId0);
-      var p0 = nodeAnchor(rkId0, sc.prod.split('-')[1]);
-      var rt0 = rackTop(ri0);
-      var pool0 = poolAnchor();
+    /* S2 回退原生池：纯 RDMA 访问 —— 水位未击穿时这就是最优路径 */
+    if (place === 'pool') {
       pulseLink('lnk-rdma-' + (ri0 + 1), 'is-flow', 3200);
       pulseLink('lnk-pool', 'is-flow', 3200);
-      var pts0 = [{ x: p0.x, y: p0.y }, { x: rt0.x, y: rt0.y }, { x: rt0.x, y: L.fabric.y + L.fabric.h + 8 },
-                  { x: pool0.x + 160, y: L.fabric.y + L.fabric.h + 8 }, { x: pool0.x + 160, y: pool0.y - 8 }];
+      var pts0 = [{ x: p0.x, y: p0.y }, { x: rt0.x, y: rt0.y }, { x: rt0.x, y: corridorY() },
+                  { x: pool0.x + 160, y: corridorY() }, { x: pool0.x + 160, y: pool0.y - 8 }];
       var t0 = token('rdma', { x: pts0[0].x, y: pts0[0].y }, { size: 10, label: 'RDMA' });
       move(t0, pts0, {
         dur: 2200, onDone: function () {
           callout(pool0.x + 90, pool0.y - 40, 'RDMA 命中 · ' + sc.delay,
-            '存量路径 · 本情景的最优选择', '#f0785a');
+            '水位未击穿 · 回退原生池 · 增量硬件在场但不参与', '#f0785a');
         }
       });
       return;
     }
 
-    var m = mhdAnchor('R1', 'MHD-1'), n = nodeAnchor('R1', 'N2');
-    var bx = busXOf(0);
+    /* S3 兜底借用：跨机架 RDMA 读远端 R1-MHD-1 —— 叠加代价仍优于过载原生池 */
+    if (place === 'remote-mhd') {
+      pulseLink('lnk-rdma-' + (ri0 + 1), 'is-flow', 3400);
+      pulseLink('lnk-rdma-1', 'is-flow', 3400);
+      var pts3 = [{ x: p0.x, y: p0.y }, { x: rt0.x, y: rt0.y }, { x: rt0.x, y: corridorY() },
+                  { x: rackX(0) + L.rack.w / 2, y: corridorY() },
+                  { x: rackX(0) + L.rack.w / 2, y: rackTop(0).y },
+                  { x: bx1, y: rackTop(0).y }, { x: bx1, y: m1.y }, { x: m1.x + 26, y: m1.y }];
+      var t3 = token('rdma', { x: pts3[0].x, y: pts3[0].y }, { size: 10, label: 'RDMA' });
+      move(t3, pts3, {
+        dur: 2400, onDone: function () {
+          hl('.mhd[data-pick="R1-MHD-1"] .fx-mhd', 'is-hot', 2600);
+          callout(rackX(0) - 10, L.rack.y - 26, '跨机架命中远端 MHD · ' + sc.delay,
+            '兜底代价：转发 + 访存叠加 · 仍优于过载原生池 7.8 µs', '#f0785a');
+        }
+      });
+      return;
+    }
 
-    if (sc.id === 'S2') {
-      /* 公共上下文（王牌情景）：两段式 ——
-         第一步：一次性跨机架复制分发（浅蓝虚线，前置开销）
-         第二步：海量并发读全部走机架内 CXL（后续收益） */
-      var pool = poolAnchor();
+    /* S4 长期共享（copy）：两段式 ——
+       第一步：一次性跨机架复制分发（浅蓝虚线，前置开销）
+       第二步：R1/R3 并发读全部走机架内 CXL + R2/R4 偶发远端读对照 */
+    if (place === 'copy') {
       [['R1', 'MHD-1', 0, 300], ['R3', 'MHD-3', 2, 1000]].forEach(function (cfg) {
         var rid = cfg[0], mid = cfg[1], ri = cfg[2], dl = cfg[3];
         var m2 = mhdAnchor(rid, mid), bx2 = busXOf(ri);
-        var pts = [{ x: pool.x + 150, y: pool.y - 16 }, { x: rackX(ri) + L.rack.w / 2, y: pool.y - 16 },
+        var pts = [{ x: pool0.x + 150, y: pool0.y - 16 }, { x: rackX(ri) + L.rack.w / 2, y: pool0.y - 16 },
                    { x: bx2, y: m2.y }, { x: m2.x + 26, y: m2.y }];
         later(function () {
           var cp = el('path', { d: pth(pts), class: 'fx-copy-path' }, root.toks);
@@ -803,7 +880,7 @@ window.FLOW_SCENE = (function () {
         }, dl);
       });
       later(function () {
-        callout(L.pool.x + 90, L.pool.y - 40, '第一步 · 一次复制分发完成', '前置开销 → 之后所有读走机架内 CXL', '#8fc6f2');
+        callout(L.pool.x + 90, L.pool.y - 40, '第一步 · 一次复制分发完成', '长期托管 → 之后大部分读走机架内 CXL', '#8fc6f2');
       }, 2100);
       later(function () {
         [['R1', 'MHD-1'], ['R3', 'MHD-3']].forEach(function (cfg) {
@@ -822,20 +899,40 @@ window.FLOW_SCENE = (function () {
             }, k * 280);
           });
         });
-        callout(rackX(0) - 6, L.rack.y - 26, '第二步 · 海量并发读 · 全部机架内命中',
+        callout(rackX(0) - 6, L.rack.y - 26, '第二步 · 海量并发读 · 机架内命中',
           'R1/R3 各自读本机副本 · 不再占用 Spine', '#53e3c4');
       }, 2900);
+      /* 对照：R2/R4 偶发经 RDMA 远端读 R1 副本 */
+      var srcC = rackTop(1);
+      var rdC = [
+        { x: srcC.x, y: srcC.y },
+        { x: srcC.x, y: corridorY() },
+        { x: rackX(0) + L.rack.w / 2, y: corridorY() },
+        { x: rackX(0) + L.rack.w / 2, y: rackTop(0).y },
+        { x: bx1, y: rackTop(0).y },
+        { x: bx1, y: m1.y },
+        { x: m1.x + 26, y: m1.y }
+      ];
+      pulseLink('lnk-rdma-2', 'is-flow', 3000);
+      later(function () {
+        var t2 = token('rdma', { x: rdC[0].x, y: rdC[0].y }, { size: 10, label: 'RDMA' });
+        move(t2, rdC, { dur: 2200 });
+      }, 4300);
+      later(function () {
+        callout(rackX(1) - 10, L.rack.y - 26, '对照 · R2/R4 偶发远端读',
+          '经 RDMA 读取 R1 副本 · Spine 只承载偶发流量', '#f0785a');
+      }, 4400);
       return;
     }
 
-    /* S1 部署型：R1 本地多路并发读（兑现机架内 CXL 原生低延迟） */
+    /* S1 本地命中：R1 多路并发读（兑现机架内 CXL 原生低延迟） */
     [['N1', 0], ['N2', 260], ['N1', 520], ['N2', 780]].forEach(function (cfg) {
       var nid = cfg[0], dl = cfg[1];
       later(function () {
         var n2 = nodeAnchor('R1', nid);
         pulseLink('lnk-cxl-R1-MHD-1', 'is-flow', 2200);
         pulseLink('lnk-cxl-R1-' + nid, 'is-flow', 2200);
-        var pts = [{ x: m.x + 26, y: m.y }, { x: bx, y: m.y }, { x: bx, y: n2.y }, { x: n2.x, y: n2.y }];
+        var pts = [{ x: m1.x + 26, y: m1.y }, { x: bx1, y: m1.y }, { x: bx1, y: n2.y }, { x: n2.x, y: n2.y }];
         var t1 = token('cxl', { x: pts[0].x, y: pts[0].y }, { size: 10, label: dl === 0 ? 'CXL' : null });
         move(t1, pts, { dur: 950, onDone: function () {
           hl('.node[data-pick="R1-' + nid + '"] .fx-hbm', 'is-hit', 1800);
@@ -851,12 +948,12 @@ window.FLOW_SCENE = (function () {
     var src = rackTop(1);
     var rd = [
       { x: src.x, y: src.y },
-      { x: src.x, y: L.fabric.y + L.fabric.h + 8 },
-      { x: rackX(0) + L.rack.w / 2, y: L.fabric.y + L.fabric.h + 8 },
+      { x: src.x, y: corridorY() },
+      { x: rackX(0) + L.rack.w / 2, y: corridorY() },
       { x: rackX(0) + L.rack.w / 2, y: rackTop(0).y },
-      { x: bx, y: rackTop(0).y },
-      { x: bx, y: m.y },
-      { x: m.x + 26, y: m.y }
+      { x: bx1, y: rackTop(0).y },
+      { x: bx1, y: m1.y },
+      { x: m1.x + 26, y: m1.y }
     ];
     pulseLink('lnk-rdma-2', 'is-flow', 3000);
     later(function () {
@@ -867,27 +964,29 @@ window.FLOW_SCENE = (function () {
   }
 
   function animMigrate(sc) {
-    var dep = (sc.deploy && sc.deploy.length) ? sc.deploy : [];
+    var place = sc.place || 'mhd';
     var pool = poolAnchor();
+    var m = mhdAnchor('R1', 'MHD-1');
+    var bx1 = busXOf(0);
 
-    /* 不部署型场景（S3/S4）：无迁移 / 无复制，数据原地保留 */
-    if (!dep.length) {
+    /* S2：水位未击穿 → 无迁移 / 无复制，数据留在原生池 */
+    if (place === 'pool') {
       later(function () {
         card('place', true, 'HOLD');
-        callout(pool.x + 80, pool.y - 40, '数据原地保留', '无迁移 · 无副本 · 单一份全网可达', '#5f9fe8');
+        callout(pool.x + 80, pool.y - 40, '数据原地保留 · 原生池',
+          '无迁移 · 无副本 · 水位未击穿不碰 CXL', '#5f9fe8');
       }, 600);
       later(function () { card('place', false, 'IDLE'); }, 3800);
       return;
     }
 
-    if (sc.id === 'S2') {
-      /* 公共上下文：原件保留在 RDMA Pool，复制两份到 R1/R3 MHD（多读场景复制优于迁移） */
-      callout(pool.x + 80, pool.y - 40, '复制 × 2', '共享 KV 副本分别落入 R1 / R3 MHD', '#a38bf2');
+    /* S4（copy）：原件保留在 RDMA Pool，复制两份到 R1/R3 MHD（多读场景复制优于迁移） */
+    if (place === 'copy') {
+      callout(pool.x + 80, pool.y - 40, '复制 × 2', '长期托管：副本分别落入 R1 / R3 MHD', '#a38bf2');
       [['R1', 'MHD-1', 300, 0], ['R3', 'MHD-3', 1500, 2]].forEach(function (cfg) {
         var rid = cfg[0], mid = cfg[1], dl = cfg[2], ri = cfg[3];
-        var m = mhdAnchor(rid, mid);
+        var m2 = mhdAnchor(rid, mid);
         var bx = busXOf(ri);
-        /* 一次性复制分发流：浅蓝虚线（前置开销） */
         var flowPts = [{ x: pool.x + 150, y: pool.y - 20 }, { x: rackX(ri) + L.rack.w / 2, y: pool.y - 20 }];
         later(function () {
           var cp = el('path', { d: pth(flowPts), class: 'fx-copy-path' }, root.toks);
@@ -896,7 +995,7 @@ window.FLOW_SCENE = (function () {
         later(function () {
           pulseLink('lnk-cxl-' + rid + '-' + mid, 'is-flow', 2200);
           var pts = [{ x: pool.x + 150, y: pool.y - 20 }, { x: rackX(ri) + L.rack.w / 2, y: pool.y - 20 },
-                     { x: bx, y: m.y }, { x: m.x + 26, y: m.y }];
+                     { x: bx, y: m2.y }, { x: m2.x + 26, y: m2.y }];
           var t = token('rep', { x: pts[0].x, y: pts[0].y }, { size: 12, label: 'COPY' });
           move(t, pts, {
             dur: 2000, keep: true, onDone: function () {
@@ -908,16 +1007,20 @@ window.FLOW_SCENE = (function () {
       return;
     }
 
-    /* S1：热点 KV 从 RDMA Pool 迁入本机架 MHD（访问主体就在 R1，迁移省容量） */
-    var m = mhdAnchor('R1', 'MHD-1');
-    var bx1 = busXOf(0);
+    /* 迁移路径：RDMA Pool → 目标 MHD
+       S1（mhd）：热点就近迁入本机架 MHD · S3（remote-mhd）：单次溢流兜底迁入远端 MHD */
     var pts = [{ x: pool.x + 150, y: pool.y - 20 }, { x: rackX(0) + L.rack.w / 2, y: pool.y - 20 },
                { x: bx1, y: m.y }, { x: m.x + 26, y: m.y }];
     var t = token('kv', { x: pts[0].x, y: pts[0].y }, { size: 12, label: 'MOVE' });
     move(t, pts, {
       dur: 2000, onDone: function () {
         hl('.mhd[data-pick="R1-MHD-1"] .fx-mhd', 'is-hot', 4000);
-        callout(m.x - 30, m.y + 40, '迁移完成', '热点就近 · 旧位置释放 · 版本 ' + sc.ver, '#e6a056');
+        if (place === 'remote-mhd') {
+          callout(m.x - 30, m.y + 40, '兜底迁移完成',
+            '单次溢流 → 迁移而非复制 · 原生池压力缓释 · 版本 ' + sc.ver, '#f0785a');
+        } else {
+          callout(m.x - 30, m.y + 40, '迁移完成', '热点就近 · 旧位置释放 · 版本 ' + sc.ver, '#e6a056');
+        }
       }
     });
     pulseLink('lnk-rdma-1', 'is-flow', 2200);
@@ -925,29 +1028,39 @@ window.FLOW_SCENE = (function () {
   }
 
   function animEvict(sc) {
-    var dep = (sc.deploy && sc.deploy.length) ? sc.deploy : [];
+    var place = sc.place || 'mhd';
     var pool = poolAnchor();
 
-    /* 不部署型场景：KV 一直在 RDMA Pool，直接标记 invalid 回收 */
-    if (!dep.length) {
+    /* S2：KV 一直在 RDMA Pool，直接标记 invalid 回收 */
+    if (place === 'pool') {
       var t = token('kv', { x: pool.x + 160, y: pool.y - 12 }, { size: 12, label: 'COLD' });
       later(function () { t.g.style.transition = 'opacity .9s'; t.g.setAttribute('opacity', '0'); }, 1200);
       later(function () {
-        callout(pool.x + 80, pool.y - 40, '淘汰完成', 'Directory 标记 invalid · 容量回收复用', '#5f9fe8');
+        callout(pool.x + 80, pool.y - 40, '淘汰完成', 'Directory 标记 invalid · 原生池容量回收复用', '#5f9fe8');
       }, 900);
       card('place', true, 'EVICT');
       later(function () { card('place', false, 'IDLE'); }, 3400);
       return;
     }
 
-    /* 部署型场景：冷 KV 从 MHD 下沉至 RDMA Pool */
+    /* 冷 KV 从 MHD 下沉 / 迁回 RDMA Pool
+       S3（remote-mhd）：原生池水位回落 → 迁回原生池，增量池让位
+       S4（copy）：复用热度回落 → 先回收副本，原件下沉 */
     var m = mhdAnchor('R1', 'MHD-1');
     var pts = [{ x: m.x + 26, y: m.y }, { x: m.x + 46, y: m.y }, { x: m.x + 46, y: pool.y - 36 },
                { x: pool.x + 40, y: pool.y - 36 }];
     var t2 = token('kv', { x: pts[0].x, y: pts[0].y }, { size: 12, label: 'COLD' });
     move(t2, pts, {
       dur: 2000, keep: true, onDone: function () {
-        callout(L.pool.x + 18, L.pool.y - 40, '下沉完成', 'Directory 标记 invalid', '#5f9fe8');
+        if (place === 'remote-mhd') {
+          callout(L.pool.x + 18, L.pool.y - 40, '迁回原生池',
+            '原生池水位回落 · 增量池容量让位新兜底请求', '#5f9fe8');
+        } else if (place === 'copy') {
+          callout(L.pool.x + 18, L.pool.y - 40, '副本回收 · 原件下沉',
+            '先回收 R3 副本 · 原件下沉 RDMA Pool', '#5f9fe8');
+        } else {
+          callout(L.pool.x + 18, L.pool.y - 40, '下沉完成', 'Directory 标记 invalid', '#5f9fe8');
+        }
       }
     });
     later(function () {
@@ -970,14 +1083,16 @@ window.FLOW_SCENE = (function () {
     curSc = sc;
     var idx = parseInt(stage.n, 10) - 1;
     if (isNaN(idx) || idx < 0) idx = 0;
-    /* 部署等级对齐阶段起点：随场景变化 ——
-       部署型场景（S1/S2）按 START_LEVEL 前进；不部署型场景（S3/S4）始终 T0 全 RDMA */
+    /* 原生 RDMA 池水位随情景同步（S2 余量充足 / S3 过载 —— 兜底判定的视觉前提） */
+    setPoolState(sc && sc.pool);
+    /* 部署等级对齐阶段起点：部署是离线一次性决策（前提已落板），
+       四情景共享同一硬件前提，按 START_LEVEL 前进 */
     var deploying = !!(sc && sc.deploy && sc.deploy.length);
     var startLv = deploying ? ((FLOW.START_LEVEL && FLOW.START_LEVEL[idx] !== undefined) ? FLOW.START_LEVEL[idx] : 0) : 0;
     if (deployLv !== startLv) setDeployLevel(startLv, false);
-    /* 自动模式：T1（R1+R3 同批）在 03 存储决策内动画触发（仅部署型场景）；
+    /* 自动模式：T1（R1+R3 同批）在 03 存储决策内动画触发；
        手动模式：交由用户点击底部部署时间轴触发。
-       T2（KV 重分配）为数据行为，由 06 阶段动画呈现，无硬件变化。 */
+       T2（KV 重分配）为数据行为，由 07 阶段动画呈现，无硬件变化。 */
     if (autoDeploy && deploying && stage.id === 'decide') {
       later(function () { if (deployLv < 1) setDeployLevel(1, true); }, 1400);
     }
@@ -1002,9 +1117,9 @@ window.FLOW_SCENE = (function () {
   function select(id) {
     document.querySelectorAll('.fx-rack').forEach(function (n) { n.classList.remove('is-sel'); });
     if (/^R\d/.test(String(id))) {
-      var g = root.racks[String(id).slice(0, 2)];
-      if (g) {
-        var rc = g.querySelector('.fx-rack');
+      var slot = root.racks[String(id).slice(0, 2)];
+      if (slot && slot.g) {
+        var rc = slot.g.querySelector('.fx-rack');
         if (rc) rc.classList.add('is-sel');
       }
     }
