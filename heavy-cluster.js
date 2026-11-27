@@ -84,7 +84,7 @@ window.HEAVY_CLUSTER = (function () {
     renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.16;
+    renderer.toneMappingExposure = 1.28;
     host.appendChild(renderer.domElement);
 
     camera = new THREE.PerspectiveCamera(34, 1, .1, 260);
@@ -258,23 +258,40 @@ window.HEAVY_CLUSTER = (function () {
         new THREE.MeshBasicMaterial({ color: accent }));
       foot.position.y = .035; g.add(foot);
 
+      /* 柜体：实心金属（透明玻璃箱是「假」的主因，改不透明） */
       var bodyGeo = new THREE.BoxGeometry(1.9, 3.9, 1.9);
       var body = new THREE.Mesh(bodyGeo, new THREE.MeshStandardMaterial({
-        color: 0x0a1420, metalness: .8, roughness: .26,
-        transparent: true, opacity: def.cxl ? .64 : .76
+        color: 0x0b141f, metalness: .85, roughness: .38
       }));
       body.position.y = 2.25;
       body.userData.rackId = def.id;
       clickable.push(body);
       g.add(body);
 
+      /* 前脸金属面板 */
+      var face = new THREE.Mesh(new THREE.BoxGeometry(1.86, 3.84, .04),
+        new THREE.MeshStandardMaterial({ color: 0x13202e, metalness: .72, roughness: .42 }));
+      face.position.set(0, 2.25, .93); g.add(face);
+
+      /* 前面两根立柱 */
+      [[-.94, .94], [.94, .94]].forEach(function (p) {
+        var post = new THREE.Mesh(new THREE.BoxGeometry(.07, 3.9, .07),
+          new THREE.MeshStandardMaterial({ color: 0x1a2836, metalness: .88, roughness: .3 }));
+        post.position.set(p[0], 2.25, p[1]); g.add(post);
+      });
+
+      /* 顶部 accent 灯带 + 边缘描边 */
+      var topStrip = new THREE.Mesh(new THREE.BoxGeometry(1.86, .04, .04),
+        new THREE.MeshBasicMaterial({ color: accent }));
+      topStrip.position.set(0, 4.21, .94); g.add(topStrip);
+
       var edges = new THREE.LineSegments(
         new THREE.EdgesGeometry(bodyGeo),
-        new THREE.LineBasicMaterial({ color: accent, transparent: true, opacity: .9 })
+        new THREE.LineBasicMaterial({ color: accent, transparent: true, opacity: .5 })
       );
       edges.position.y = 2.25; g.add(edges);
 
-      /* 4 台 4U 服务器 */
+      /* 4 台 4U 服务器：散热格栅 + 硬盘位 + 状态灯 + 把手 */
       var servers = [];
       for (var s = 0; s < 4; s++) {
         var sy = .78 + s * .78;
@@ -282,35 +299,53 @@ window.HEAVY_CLUSTER = (function () {
         sv.position.set(0, sy, 0);
 
         var chassis = new THREE.Mesh(
-          new THREE.BoxGeometry(1.6, .62, 1.5),
-          new THREE.MeshStandardMaterial({ color: 0x101c2a, metalness: .78, roughness: .34 })
+          new THREE.BoxGeometry(1.72, .6, 1.7),
+          new THREE.MeshStandardMaterial({ color: 0x0d1722, metalness: .82, roughness: .36 })
         );
         sv.add(chassis);
 
+        var bezel = new THREE.Mesh(
+          new THREE.BoxGeometry(1.68, .56, .04),
+          new THREE.MeshStandardMaterial({ color: 0x101a26, metalness: .8, roughness: .4 })
+        );
+        bezel.position.set(0, 0, .85); sv.add(bezel);
+
+        /* 散热格栅：8 条水平缝 */
+        for (var v = 0; v < 8; v++) {
+          var slat = new THREE.Mesh(
+            new THREE.BoxGeometry(1.1, .022, .012),
+            new THREE.MeshStandardMaterial({ color: 0x04070b, metalness: .4, roughness: .9 })
+          );
+          slat.position.set(-.05, -.21 + v * .06, .875);
+          sv.add(slat);
+        }
+
+        /* 6 个硬盘位 */
         for (var b = 0; b < 6; b++) {
           var bay = new THREE.Mesh(
-            new THREE.BoxGeometry(.2, .34, .03),
-            new THREE.MeshStandardMaterial({ color: 0x16283a, metalness: .6, roughness: .5 })
+            new THREE.BoxGeometry(.16, .26, .02),
+            new THREE.MeshStandardMaterial({ color: 0x1c2e40, metalness: .6, roughness: .55 })
           );
-          bay.position.set(-.62 + b * .25, 0, .74);
+          bay.position.set(.42 + b * .22, .08, .872);
           sv.add(bay);
         }
 
-        var led = new THREE.Mesh(new THREE.BoxGeometry(.5, .035, .03),
+        /* 状态灯条（发光） */
+        var led = new THREE.Mesh(new THREE.BoxGeometry(.34, .05, .03),
           new THREE.MeshBasicMaterial({ color: accent }));
-        led.position.set(.48, .22, .74);
+        led.position.set(.7, -.22, .872);
         sv.add(led);
+
+        /* 两侧把手 */
+        [[-.85, 0], [.85, 0]].forEach(function (h) {
+          var handle = new THREE.Mesh(new THREE.BoxGeometry(.05, .16, .05),
+            new THREE.MeshStandardMaterial({ color: 0x2a3a4a, metalness: .9, roughness: .3 }));
+          handle.position.set(h[0], 0, .86);
+          sv.add(handle);
+        });
 
         g.add(sv);
         servers.push({ group: sv, led: led });
-      }
-
-      /* 密集 U 位灯带：让机柜读起来是满配服务器阵列而不是四个方块 */
-      var slotMat = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: .5 });
-      for (var u = 0; u < 18; u++) {
-        var sl = new THREE.Mesh(new THREE.BoxGeometry(1.52, .02, .02), slotMat);
-        sl.position.set(0, .62 + u * .19, .962);
-        g.add(sl);
       }
 
       /* CXL 器件 */
@@ -319,14 +354,14 @@ window.HEAVY_CLUSTER = (function () {
         var sw = new THREE.Mesh(
           new THREE.BoxGeometry(1.55, .3, .9),
           new THREE.MeshStandardMaterial({ color: 0x123035, metalness: .7, roughness: .34,
-            emissive: C.cxl, emissiveIntensity: .35 })
+            emissive: C.cxl, emissiveIntensity: .7 })
         );
         sw.position.set(0, swY, -.1); g.add(sw);
 
         var mhd = new THREE.Mesh(
           new THREE.BoxGeometry(1.55, .34, 1.1),
           new THREE.MeshStandardMaterial({ color: 0x0e2a28, metalness: .6, roughness: .3,
-            emissive: C.cxl, emissiveIntensity: .45 })
+            emissive: C.cxl, emissiveIntensity: .85 })
         );
         mhd.position.set(0, swY + .48, -.1); g.add(mhd);
 
@@ -334,7 +369,7 @@ window.HEAVY_CLUSTER = (function () {
         mhdGlow.position.set(0, swY + .48, .4); g.add(mhdGlow);
       }
 
-      var pl = new THREE.PointLight(accent, 3.6, 9);
+      var pl = new THREE.PointLight(accent, 4.6, 10);
       pl.position.set(0, 2.0, .6); g.add(pl);
 
       racks.push({ id: def.id, cxl: def.cxl, group: g, servers: servers, accent: accent,
