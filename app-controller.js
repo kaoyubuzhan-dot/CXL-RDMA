@@ -45,9 +45,9 @@
     if (!(STATE.page === 'lc' && window.__RENDER_LC__)) window.__RENDER_PANELS__.renderScenarioUI();
     window.__RENDER_PANELS__.renderDist();
     window.__RENDER_PANELS__.renderAnalysis();
-    // rack 页委托给硬件拓扑工作台（三种视角）；其余页用原 SVG 渲染器
+    // rack 页委托给硬件拓扑工作台（四种视角）；解剖视角走 rack3d WebGL，其余用 SVG 渲染器
     if (STATE.page === 'rack') {
-      window.__RENDER_HW__.renderHardware();
+      if (!syncRack3d()) window.__RENDER_HW__.renderHardware();
     } else if (STATE.page === 'lc' && window.__RENDER_LC__) {
       window.__RENDER_LC__.sync();
     } else {
@@ -77,6 +77,42 @@
     window.__RENDER_PANELS__.renderRight();
     window.__RENDER_PANELS__.renderConsole();
   };
+
+  // ---------- 03 机架解剖 · 三维表征（rack3d） ----------
+  // 解剖视角：单机架 4 Server + 1 MHD 全局拓扑 + 点击悬浮解剖 + 器件作用点解析
+  function ensureRack3d() {
+    if (!window.__RACK3D__ || !window.__RACK3D__.available) {
+      toast('WebGL 不可用 · 回落 U 位图解');
+      return null;
+    }
+    let host = document.getElementById('rack3d');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'rack3d';
+      $('#stage').insertBefore(host, $('#stage-hint'));
+      window.__RACK3D__.mount(host);
+    }
+    return host;
+  }
+  // 返回 true = 解剖视图已接管舞台（SVG 不再渲染）；false = 走原 SVG 渲染器
+  function syncRack3d() {
+    const want = STATE.page === 'rack' && STATE.hwView === 'dissect';
+    if (!want) {
+      const h0 = document.getElementById('rack3d');
+      if (h0) {
+        h0.style.display = 'none';
+        if (window.__RACK3D__ && window.__RACK3D__.available) window.__RACK3D__.show(false);
+      }
+      return false;
+    }
+    const ok = ensureRack3d();
+    if (!ok) return false;
+    const host = document.getElementById('rack3d');
+    host.style.display = 'block';
+    window.__RACK3D__.sync(STATE.selectedRack || 'R1');
+    window.__RACK3D__.show(true);
+    return true;
+  }
 
   // ---------- 02 集群总览 · 2D/3D 切换（原 06 三维建模合并入口） ----------
   // 确保三维集群容器存在并挂载（与 lc 页共用 #gllc 与 __GLCLUSTER__ 单例）
@@ -135,8 +171,8 @@
     const m = S.computeMetrics();
     const map = {
       overview: ['CLUSTER TOPOLOGY · LEAF-SPINE RDMA', `4 RACKS · ${st.count} CXL RACKS · ${st.units} MHD · AVG ${S.fmtNs(m.avgNs)}`],
-      rack: ['HARDWARE TOPOLOGY · ' + ({physical:'PHYSICAL RACK',network:'LEAF-SPINE',threeD:'ISOMETRIC',pipeline:'INFERENCE PIPELINE'}[STATE.hwView]||'PHYSICAL RACK'),
-             STATE.selectedRack + ' · ' + ({physical:'U位 / 端口 / CXL连接',network:'RDMA + 机架内CXL',threeD:'4 RACKS · 可旋转',pipeline:'GPU/HBM · KV 生命周期'}[STATE.hwView]||'')],
+      rack: ['HARDWARE TOPOLOGY · ' + ({dissect:'RACK DISSECT · 4 SERVERS + 1 MHD',physical:'PHYSICAL RACK',network:'LEAF-SPINE',threeD:'ISOMETRIC',pipeline:'INFERENCE PIPELINE'}[STATE.hwView]||'PHYSICAL RACK'),
+             STATE.selectedRack + ' · ' + ({dissect:'全局拓扑 + 点击悬浮解剖 + 器件作用点',physical:'U位 / 端口 / CXL连接',network:'RDMA + 机架内CXL',threeD:'4 RACKS · 可旋转',pipeline:'GPU/HBM · KV 生命周期'}[STATE.hwView]||'')],
       kv: ['KV CACHE DISTRIBUTION', 'CXL MHD vs RDMA POOL · 示意'],
       traffic: ['RDMA ACCESS PATHS · LINK LOAD', 'SCENARIO ' + STATE.scenario],
       compare: ['DEPLOYMENT COMPARISON', 'A / B / C 方案对比']
@@ -350,11 +386,11 @@
   // 硬件拓扑工作台：视角切换 / 端口级连接 / 路径高亮 / 端口配置
   // ============================================================
   APP.switchHWView = function (view) {
-    if (!['physical','network','threeD','pipeline'].includes(view)) return;
+    if (!['dissect','physical','network','threeD','pipeline'].includes(view)) return;
     STATE.hwView = view;
     STATE.activePort = null;
     STATE.pathHighlight = null;
-    log('硬件视图 → ' + {physical:'机架物理视图',network:'网络拓扑视图',threeD:'集群三维视图',pipeline:'推理管线视图'}[view], true);
+    log('硬件视图 → ' + {dissect:'机架解剖三维表征',physical:'机架物理视图',network:'网络拓扑视图',threeD:'集群三维视图',pipeline:'推理管线视图'}[view], true);
     APP.render();
   };
   APP.rotate3D = function (delta) {
@@ -807,7 +843,7 @@
     if (p && ['run','overview','rack','kv','traffic','lc','compare'].includes(p)) STATE.page = p;
     if (p === 'lc' && window.__RENDER_LC__) { const lcs = params.get('lcsc'); if (lcs) STATE.lc = { scene: lcs, step: 0, playing: false }; }
     const hv = params.get('hwview');
-    if (hv && ['physical','network','threeD','pipeline'].includes(hv)) STATE.hwView = hv;
+    if (hv && ['dissect','physical','network','threeD','pipeline'].includes(hv)) STATE.hwView = hv;
     const ov = params.get('oview');
     if (ov === '2d' || ov === '3d') STATE.oview = ov;
     const want3d = params.get('v3d') === '1';

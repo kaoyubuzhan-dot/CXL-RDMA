@@ -59,7 +59,7 @@
     comparePlan: 'B',
     showLabels: true,
     // ---- 硬件拓扑工作台 ----
-    hwView: 'threeD', oview: '3d',
+    hwView: 'dissect', oview: '3d',
     hwSelected: null,
     activePort: null,
     pathHighlight: null,
