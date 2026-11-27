@@ -23,6 +23,11 @@
     $$('.lang-btn').forEach(b => b.classList.toggle('is-active', b.getAttribute('data-lang') === STATE.lang));
     // 「运行流程」页：自带舞台与左右面板，不经过 SVG / WebGL 渲染器
     if (STATE.page === 'run' && window.__RENDER_FLOW__) {
+      // 先收起机架解剖三维等"靠行内样式挂显隐"的浮层（GLUI/GLA 只在本函数末尾
+      // 同步，而这里提前 return 会跳过它们）—— 否则从 03 三维视图直接切 01
+      // 会出现两层页面重合
+      if (window.__GLUI__) { try { window.__GLUI__.sync(); } catch (e) {} }
+      if (window.__GLA__) { try { window.__GLA__.sync(); } catch (e) {} }
       window.__RENDER_FLOW__.renderAll();
       return;
     }
