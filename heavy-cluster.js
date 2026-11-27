@@ -154,6 +154,41 @@ window.HEAVY_CLUSTER = (function () {
       sil.position.set(i * 4.6, h / 2, -13.5);
       scene.add(sil);
     }
+
+    buildHall();
+  }
+
+  /* 背景机房大厅：成排机柜 + 密集灯带，制造「数据中心」纵深与光密度 */
+  function buildHall() {
+    var rackMat = new THREE.MeshStandardMaterial({ color: 0x0a1522, metalness: .7, roughness: .45 });
+    var slotGeo = new THREE.BoxGeometry(1.02, .028, .02);
+    var accents = [C.rdma, C.cxl, 0x38bdf8, C.rdma];
+    var rowZ = [-9.5, -14.5];
+
+    rowZ.forEach(function (z, ri) {
+      for (var k = -7; k <= 7; k++) {
+        if (ri === 1 && Math.abs(k) > 5) continue;
+        var hh = 3.2 + ((k + 9) % 3) * .5;
+        var rg = new THREE.Group();
+        var box = new THREE.Mesh(new THREE.BoxGeometry(1.5, hh, 1.3), rackMat);
+        box.position.y = hh / 2;
+        rg.add(box);
+
+        var accent = accents[Math.abs(k) % accents.length];
+        var slotMat = new THREE.MeshBasicMaterial({
+          color: accent, transparent: true, opacity: ri === 0 ? .55 : .28
+        });
+        var n = Math.floor(hh / .26);
+        for (var s = 0; s < n; s++) {
+          if ((s + k) % 3 === 0) continue;
+          var slot = new THREE.Mesh(slotGeo, slotMat);
+          slot.position.set(0, .3 + s * .26, .67);
+          rg.add(slot);
+        }
+        rg.position.set(k * 2.05, 0, z);
+        scene.add(rg);
+      }
+    });
   }
 
   /* ── 中央调度器 ── */
@@ -268,6 +303,14 @@ window.HEAVY_CLUSTER = (function () {
 
         g.add(sv);
         servers.push({ group: sv, led: led });
+      }
+
+      /* 密集 U 位灯带：让机柜读起来是满配服务器阵列而不是四个方块 */
+      var slotMat = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: .5 });
+      for (var u = 0; u < 18; u++) {
+        var sl = new THREE.Mesh(new THREE.BoxGeometry(1.52, .02, .02), slotMat);
+        sl.position.set(0, .62 + u * .19, .962);
+        g.add(sl);
       }
 
       /* CXL 器件 */
@@ -431,7 +474,7 @@ window.HEAVY_CLUSTER = (function () {
       var el = document.createElement('div');
       el.className = 'hv-lbl';
       el.style.borderColor = '#' + ('000000' + d.color.toString(16)).slice(-6);
-      el.innerHTML = '<b>' + d.title + '</b><i>' + d.sub + '</i>';
+      el.innerHTML = '<b>' + d.title + '</b>';
       labelLayer.appendChild(el);
       labelEls.push(el);
     });
@@ -455,6 +498,10 @@ window.HEAVY_CLUSTER = (function () {
     var wrap = document.createElement('div');
     wrap.className = 'hv-ui';
 
+    var cap = document.createElement('div');
+    cap.className = 'hv-cap';
+    wrap.appendChild(cap);
+
     var tabs = document.createElement('div');
     tabs.className = 'hv-tabs';
     Object.keys(SCEN).forEach(function (k) {
@@ -468,18 +515,13 @@ window.HEAVY_CLUSTER = (function () {
     });
     wrap.appendChild(tabs);
 
-    var cap = document.createElement('div');
-    cap.className = 'hv-cap';
-    wrap.appendChild(cap);
-
     var card = document.createElement('div');
     card.className = 'hv-card';
     card.innerHTML = '<div class="hv-card-h"><b id="hv-card-id">R1</b><span id="hv-card-tag">CXL + RDMA</span></div>' +
       '<ul id="hv-card-list"></ul>' +
       '<button type="button" class="hv-jump" id="hv-jump">打开 03 机架解剖 →</button>';
-    wrap.appendChild(card);
-
     host.appendChild(wrap);
+    host.appendChild(card);
     ui.wrap = wrap; ui.cap = cap; ui.card = card;
     ui.cardId = card.querySelector('#hv-card-id');
     ui.cardTag = card.querySelector('#hv-card-tag');
