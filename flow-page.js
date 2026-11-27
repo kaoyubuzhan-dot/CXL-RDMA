@@ -25,6 +25,11 @@ window.__RENDER_FLOW__ = (function () {
   }
   function sc() { return F.pick(st().scenario); }
   function stage() { return F.STAGES[Math.min(st().stage, F.STAGES.length - 1)]; }
+  /* 场景级文案覆盖：sc.ov[stageId][field] 优先于默认 STAGES 文案 */
+  function stx(sg, s, field) {
+    var ov = s && s.ov && s.ov[sg.id] && s.ov[sg.id][field];
+    return ov !== undefined ? ov : sg[field];
+  }
 
   /* ───────── DOM ───────── */
   function ensureDom() {
@@ -60,7 +65,11 @@ window.__RENDER_FLOW__ = (function () {
       n.classList.toggle('is-act', i === 1 && act1);
     });
     var cnt = strip.querySelector('.fl-dep-cnt');
-    if (cnt) cnt.textContent = (lv >= 1 ? 2 : 0) + ' / 4 机架';
+    if (cnt) {
+      var cur = sc();
+      cnt.textContent = (lv >= 1 ? 2 : 0) + ' / 4 机架' +
+        (!(cur.deploy && cur.deploy.length) ? ' · 本情景维持全 RDMA' : '');
+    }
   }
 
   function onPick(id) {
@@ -84,7 +93,8 @@ window.__RENDER_FLOW__ = (function () {
     var s = st(), cur = stage();
     var h = '';
 
-    h += '<div class="fl-sec"><div class="fl-sec-h"><span>实验场景</span><i>SCENARIO</i></div>';
+    h += '<div class="fl-sec"><div class="fl-sec-h"><span>实验场景</span><i>SCENARIO</i></div>' +
+      '<div class="fl-scn-hint">核心入口：这批 KV 有没有明确的主力访问机架？</div>';
     F.SCENARIOS.forEach(function (sn) {
       h += '<button type="button" class="fl-scn' + (sn.id === s.scenario ? ' is-on' : '') + '" data-scn="' + sn.id + '">' +
         '<span class="fl-scn-k">' + sn.id + '</span>' +
@@ -143,17 +153,18 @@ window.__RENDER_FLOW__ = (function () {
       '</div>';
 
     h += '<div class="fl-card fl-card--what"><div class="fl-card-h"><i class="fl-bar"></i><span>发生了什么</span><b>' + sg.n + '</b></div>' +
-      what('动作', F.fill(sg.act, s), 'act') +
-      what('对象', F.fill(sg.obj, s), 'obj') +
-      what('原因', F.fill(sg.why, s), 'why') +
-      what('结果', F.fill(sg.res, s), 'res') +
+      what('动作', F.fill(stx(sg, s, 'act'), s), 'act') +
+      what('对象', F.fill(stx(sg, s, 'obj'), s), 'obj') +
+      what('原因', F.fill(stx(sg, s, 'why'), s), 'why') +
+      what('结果', F.fill(stx(sg, s, 'res'), s), 'res') +
       '</div>';
 
-    /* 阶段 03：呈现全局部署决策依据（全网证据加权评分） */
-    if (sg.id === 'decide' && F.DEPLOY_DECISION) {
+    /* 阶段 03：呈现全局部署决策依据（随场景变化：S1/S2 部署 R1+R3，S3/S4 维持全 RDMA） */
+    if (sg.id === 'decide' && s.decision) {
+      var D = s.decision;
       h += '<div class="fl-card"><div class="fl-card-h"><i class="fl-bar"></i><span>全局部署决策</span><b>评分</b></div>' +
-        '<div class="fl-dec-note">局部性 · 历史热度 · 拥塞 · 利用率 · 成本 加权 · 示意非实测</div>' +
-        F.DEPLOY_DECISION.racks.map(function (r) {
+        '<div class="fl-dec-note">' + esc(D.note || '局部性 · 历史热度 · 拥塞 · 利用率 · 成本 加权 · 示意非实测') + '</div>' +
+        D.racks.map(function (r) {
           return '<div class="fl-dec-row' + (r.score >= 60 ? ' is-pick' : '') + '">' +
             '<b>' + r.id + '</b>' +
             '<div class="fl-dec-bar"><i style="width:' + r.score + '%"></i></div>' +
@@ -209,8 +220,10 @@ window.__RENDER_FLOW__ = (function () {
     var mode = st().mode || 'auto';
     var idx = st().stage;
     var act1 = mode === 'manual' && lv < 1 && idx >= 2;
+    var deploying = !!(cur.deploy && cur.deploy.length);
     h += '<div class="fl-dep" id="fl-dep-strip">';
-    h += '<span class="fl-dep-h">CXL 增量部署</span><span class="fl-dep-cnt">' + (lv >= 1 ? 2 : 0) + ' / 4 机架</span>';
+    h += '<span class="fl-dep-h">CXL 增量部署</span><span class="fl-dep-cnt">' + (lv >= 1 ? 2 : 0) + ' / 4 机架' +
+      (deploying ? '' : ' · 本情景维持全 RDMA') + '</span>';
     h += '<span class="fl-dep-mode"><button type="button" class="fl-dep-mb' + (mode === 'auto' ? ' is-on' : '') +
       '" data-depmode="auto" title="Controller 按决策矩阵自动部署">自动</button>' +
       '<button type="button" class="fl-dep-mb' + (mode === 'manual' ? ' is-on' : '') +
@@ -227,7 +240,7 @@ window.__RENDER_FLOW__ = (function () {
 
     h += '<div class="fl-deck-bot">' +
       '<div class="fl-caption"><span class="fl-cap-tag">当前动画</span><p>' +
-        esc(F.fill(sg.caption, cur)) + '</p></div>' +
+        esc(F.fill(stx(sg, cur, 'caption'), cur)) + '</p></div>' +
       '<div class="fl-kpis">' +
         kpi('延迟', cur.delay) + kpi('链路', cur.load) + kpi('MHD', cur.occ) +
       '</div>' +
@@ -270,6 +283,11 @@ window.__RENDER_FLOW__ = (function () {
   function onDepClick(i) {
     var s = st();
     var lv = scene.deployLevel ? scene.deployLevel() : 1;
+    var cur = sc();
+    if (!cur.deploy || !cur.deploy.length) {
+      S.toast('本情景（' + cur.zh + '）的决策为「不部署远端 CXL」—— 维持全 RDMA，见 03 决策矩阵');
+      return;
+    }
     if (s.mode !== 'manual') { S.toast('自动模式下由 Controller 按决策矩阵部署，可切换为手动模式亲自操作'); return; }
     if (i === 1 && lv < 1) {
       if (s.stage < 2) { S.toast('请先运行到 03 存储决策，查看全局评估依据'); return; }
@@ -316,12 +334,13 @@ window.__RENDER_FLOW__ = (function () {
     var sg = stage(), cur = sc();
     playStage(sg, cur);
     if (sg.id === 'access') scene.select('R1');
-    pushLog(sg.n + ' ' + sg.zh + ' · ' + F.fill(sg.caption, cur).slice(0, 46) + '…');
+    pushLog(sg.n + ' ' + sg.zh + ' · ' + F.fill(stx(sg, cur, 'caption'), cur).slice(0, 46) + '…');
     if (window.__SIM__ && S.log) { try { S.log('[FLOW ' + sg.n + '] ' + sg.zh); } catch (e) {} }
     renderLeft(); renderRight(); renderDeck();
     if (s.playing) {
       var lv = scene.deployLevel ? scene.deployLevel() : 1;
-      var block = s.mode === 'manual' && sg.id === 'decide' && lv < 1;
+      var block = s.mode === 'manual' && sg.id === 'decide' && lv < 1 &&
+        !!(cur.deploy && cur.deploy.length);
       if (block) {
         pushLog('手动模式：请在底部部署时间轴点击 T1 执行增量部署后继续');
         renderDeck();

@@ -204,6 +204,8 @@
 .fl-sec-h span{font-family:var(--cn);font-size:11px;color:var(--soft);letter-spacing:.06em}
 .fl-sec-h i{font-family:var(--mono);font-size:7.5px;font-style:normal;letter-spacing:.12em;color:var(--deep)}
 
+.fl-scn-hint{font-size:10.5px;color:rgba(167,197,215,.65);letter-spacing:.04em;padding:2px 9px 6px;
+  border-bottom:1px dashed rgba(167,197,215,.14);margin-bottom:6px}
 .fl-scn{display:flex;align-items:center;gap:9px;width:100%;padding:7px 9px;margin:0 0 3px;
   border:1px solid transparent;background:transparent;color:var(--muted);text-align:left;transition:.16s}
 .fl-scn:hover{background:rgba(120,180,201,.05);color:var(--soft)}
