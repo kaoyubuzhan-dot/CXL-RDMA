@@ -15,17 +15,38 @@ window.FLOW_SCENE = (function () {
   'use strict';
 
   var NS = 'http://www.w3.org/2000/svg';
-  var W = 1160, H = 760;
+  var H = 760;
+  var W = 1160;
 
-  var L = {
-    fabric: { x: 40, y: 26, w: 1080, h: 42 },
-    ctrl:   { x: 852, y: 104, w: 276, h: 476 },
-    rack:   { y: 104, h: 476, w: 180, xs: [40, 242, 444, 646] },
-    pool:   { x: 40, y: 640, w: 786, h: 76 },
-    busY:   600
-  };
+  /* ── 自适应宽度布局：viewBox 宽度贴合宿主容器纵横比（消除左右留白），
+     机架 / 节点 / 池 / Fabric 随宽度同步拉伸放大 ── */
+  var L = {};
   var NODE_Y = [142, 206, 270, 334], NODE_H = 58, NODE_X = 10, NODE_W = 132;
   var MHD_Y = [404, 472], MHD_H = 64;
+
+  function fitW() {
+    var cw = host ? host.clientWidth : 0, ch = host ? host.clientHeight : 0;
+    if (cw > 140 && ch > 140) {
+      return Math.max(1160, Math.min(2240, Math.round(H * cw / ch)));
+    }
+    return 1160;
+  }
+  function computeLayout(w) {
+    W = w;
+    var M = 40;
+    var ctrlW = Math.max(276, Math.min(340, Math.round(w * 0.23)));
+    L.fabric = { x: M, y: 26, w: w - M * 2, h: 42 };
+    L.ctrl = { x: w - M - ctrlW, y: 104, w: ctrlW, h: 476 };
+    var right = L.ctrl.x - 32;
+    var rw = Math.min(300, Math.floor((right - M - 42) / 4));
+    var gap = (right - M - rw * 4) / 3;
+    L.rack = { y: 104, h: 476, w: rw,
+      xs: [M, M + rw + gap, M + (rw + gap) * 2, M + (rw + gap) * 3] };
+    L.pool = { x: M, y: 640, w: right - M, h: 76 };
+    L.busY = 600;
+    /* 节点宽度 = 机架宽 - 左右边距（右侧留出 CXL 总线走廊） */
+    NODE_W = rw - 48;
+  }
   var CTRL_CARDS = [
     { id: 'profiler', zh: 'Workload Profiler', en: '访问局部性 / 热度画像' },
     { id: 'topo',     zh: 'Topology Monitor',  en: '节点 · CXL 可达性' },
@@ -37,6 +58,7 @@ window.FLOW_SCENE = (function () {
   var svg = null, host = null, root = {}, onSelect = null;
   var actors = [], raf = null, t0 = 0, timers = [];
   var curSc = null;
+  var lastPlay = null, replaying = false;
   /* CXL 增量部署等级：0=T0 全RDMA · 1=T1 R1+R3 同批部署 */
   var deployLv = -1, onDeployCb = null;
   /* 自动模式：Controller 按决策在阶段内自动触发部署；手动模式：等待用户点击部署时间轴 */
@@ -80,7 +102,7 @@ window.FLOW_SCENE = (function () {
   function rackBottom(i) { return { x: rackX(i) + L.rack.w / 2, y: L.rack.y + L.rack.h }; }
   function fabricIn(i) { return { x: rackTop(i).x, y: L.fabric.y + L.fabric.h }; }
   function poolAnchor() { return { x: L.pool.x + L.pool.w / 2, y: L.pool.y }; }
-  function busXOf(i) { return rackX(i) + NODE_X + NODE_W + 12; }
+  function busXOf(i) { return rackX(i) + L.rack.w - 26; }
   function pth(pts) {
     var d = 'M' + pts[0].x + ',' + pts[0].y;
     for (var i = 1; i < pts.length; i++) d += ' L' + pts[i].x + ',' + pts[i].y;
@@ -93,6 +115,7 @@ window.FLOW_SCENE = (function () {
 
   /* ───────────── 构建静态场景 ───────────── */
   function build() {
+    computeLayout(fitW());
     svg = el('svg', {
       id: 'flow-svg', viewBox: '0 0 ' + W + ' ' + H,
       preserveAspectRatio: 'xMidYMid meet', 'aria-label': 'CXL-RDMA 集群运行流程'
@@ -129,19 +152,22 @@ window.FLOW_SCENE = (function () {
 
   function drawBackdrop() {
     var g = el('g', { opacity: '.35' }, root.under);
-    for (var i = 0; i <= 20; i++) {
+    var cols = Math.ceil((W - 40) / 57);
+    for (var i = 0; i <= cols; i++) {
       el('line', { x1: 20 + i * 57, y1: 90, x2: 20 + i * 57, y2: 730, stroke: 'rgba(120,168,189,.07)', 'stroke-width': '.6' }, g);
     }
     for (var j = 0; j <= 13; j++) {
-      el('line', { x1: 20, y1: 730 - j * 47, x2: 1140, y2: 730 - j * 47, stroke: 'rgba(120,168,189,.06)', 'stroke-width': '.6' }, g);
+      el('line', { x1: 20, y1: 730 - j * 47, x2: W - 20, y2: 730 - j * 47, stroke: 'rgba(120,168,189,.06)', 'stroke-width': '.6' }, g);
     }
   }
 
   function drawFabric() {
     var f = L.fabric, g = el('g', { class: 'node-fabric', 'data-pick': 'FABRIC' }, root.boxes);
     el('rect', { x: f.x, y: f.y, width: f.w, height: f.h, rx: 2, class: 'fx-bar' }, g);
+    var chipsW = 15 * 33 + 24;
+    var chipX0 = f.x + (f.w - chipsW) / 2;
     for (var i = 0; i < 16; i++) {
-      el('rect', { x: f.x + 300 + i * 33, y: f.y + 16, width: 24, height: 10, rx: 1.5, class: 'fx-chip' }, g);
+      el('rect', { x: chipX0 + i * 33, y: f.y + 16, width: 24, height: 10, rx: 1.5, class: 'fx-chip' }, g);
     }
     txt('LEAF–SPINE  FABRIC', { x: f.x + 20, y: f.y + 26, class: 'fx-t1' }, g);
     txt('ROCE V2 · 400G · ECMP · 无阻塞交换', { x: f.x + 20, y: f.y + 38, class: 'fx-t3' }, g);
@@ -184,8 +210,9 @@ window.FLOW_SCENE = (function () {
         el('rect', { x: x + NODE_X, y: ny, width: NODE_W, height: NODE_H, rx: 2, class: 'fx-node' }, ng);
         txt(nd.id, { x: x + NODE_X + 9, y: ny + 23, class: 'fx-node-id' }, ng);
         txt(nd.role, { x: x + NODE_X + 9, y: ny + 40, class: 'fx-t3' }, ng);
-        el('rect', { x: x + NODE_X + 84, y: ny + 31, width: 40, height: 18, rx: 1, class: 'fx-hbm', 'data-slot': rk.id + '-' + nd.id }, ng);
-        txt('HBM', { x: x + NODE_X + 104, y: ny + 44, class: 'fx-t4', 'text-anchor': 'middle' }, ng);
+        var hbmX = x + NODE_X + NODE_W - 48;
+        el('rect', { x: hbmX, y: ny + 31, width: 40, height: 18, rx: 1, class: 'fx-hbm', 'data-slot': rk.id + '-' + nd.id }, ng);
+        txt('HBM', { x: hbmX + 20, y: ny + 44, class: 'fx-t4', 'text-anchor': 'middle' }, ng);
         liveDot(x + NODE_X + NODE_W - 6, ny + 8, ng);
       });
 
@@ -223,9 +250,9 @@ window.FLOW_SCENE = (function () {
       el('rect', { x: x + NODE_X, y: my, width: NODE_W, height: MHD_H, rx: 2, class: 'fx-mhd' }, mg);
       txt(mh.id, { x: x + NODE_X + 9, y: my + 20, class: 'fx-mhd-id' }, mg);
       txt(mh.used + ' / ' + mh.cap + ' GB', { x: x + NODE_X + 9, y: my + 36, class: 'fx-t3' }, mg);
-      el('rect', { x: x + NODE_X + 9, y: my + 48, width: 114, height: 5, rx: 2, class: 'fx-bar-bg' }, mg);
+      el('rect', { x: x + NODE_X + 9, y: my + 48, width: NODE_W - 18, height: 5, rx: 2, class: 'fx-bar-bg' }, mg);
       el('rect', {
-        x: x + NODE_X + 9, y: my + 48, width: 114 * (mh.used / mh.cap), height: 5, rx: 2,
+        x: x + NODE_X + 9, y: my + 48, width: (NODE_W - 18) * (mh.used / mh.cap), height: 5, rx: 2,
         class: 'fx-bar-fill', 'data-bar': rk.id + '-' + mh.id
       }, mg);
       txt('MHD', { x: x + NODE_X + NODE_W - 9, y: my + 20, class: 'fx-t4', 'text-anchor': 'end' }, mg);
@@ -256,8 +283,9 @@ window.FLOW_SCENE = (function () {
       /* 主机接入 CXL 徽标 */
       [0, 1].forEach(function (ni) {
         var ny = nodeY(ni);
-        el('rect', { x: x + NODE_X + 84, y: ny + 11, width: 32, height: 14, rx: 1, class: 'fx-pill fx-pill--cxl' }, g);
-        txt('CXL', { x: x + NODE_X + 100, y: ny + 21, class: 'fx-pill-t', 'text-anchor': 'middle' }, g);
+        var bxl = x + NODE_X + NODE_W - 46;
+        el('rect', { x: bxl, y: ny + 11, width: 32, height: 14, rx: 1, class: 'fx-pill fx-pill--cxl' }, g);
+        txt('CXL', { x: bxl + 16, y: ny + 21, class: 'fx-pill-t', 'text-anchor': 'middle' }, g);
       });
       txt('CXL SW · 2 HOST PORT', { x: x + NODE_X, y: MHD_Y[1] + MHD_H + 22, class: 'fx-t4' }, g);
     }
@@ -290,9 +318,10 @@ window.FLOW_SCENE = (function () {
     txt('POOL-A', { x: p.x + p.w - 16, y: p.y + 24, class: 'fx-t2', 'text-anchor': 'end' }, g);
     txt('SLA · 4.1 µs', { x: p.x + p.w - 16, y: p.y + 40, class: 'fx-t3', 'text-anchor': 'end' }, g);
     root.poolSlots = [];
+    var step = (p.w - 32 - 44) / 13;
     for (var i = 0; i < 14; i++) {
       root.poolSlots.push(el('rect', {
-        x: p.x + 16 + i * 54, y: p.y + 52, width: 44, height: 12, rx: 1,
+        x: p.x + 16 + i * step, y: p.y + 52, width: 44, height: 12, rx: 1,
         class: 'fx-pool-slot' + (i < 4 ? ' is-used' : '')
       }, g));
     }
@@ -1065,7 +1094,7 @@ window.FLOW_SCENE = (function () {
     });
     later(function () {
       var bar = document.querySelector('[data-bar="R1-MHD-1"]');
-      if (bar) { bar.style.transition = 'width 1.2s'; bar.setAttribute('width', 114 * 0.24); }
+      if (bar) { bar.style.transition = 'width 1.2s'; bar.setAttribute('width', (NODE_W - 18) * 0.24); }
       card('place', true, 'EVICT -> POOL');
     }, 600);
     later(function () { card('place', false, 'IDLE'); }, 3400);
@@ -1078,8 +1107,10 @@ window.FLOW_SCENE = (function () {
     query: animQuery, access: animAccess, migrate: animMigrate, evict: animEvict
   };
 
-  function play(stage, sc) {
+  function play(stage, sc, isReplay) {
     clear();
+    lastPlay = { stage: stage, sc: sc };
+    replaying = !!isReplay;
     curSc = sc;
     var idx = parseInt(stage.n, 10) - 1;
     if (isNaN(idx) || idx < 0) idx = 0;
@@ -1097,7 +1128,7 @@ window.FLOW_SCENE = (function () {
       later(function () { if (deployLv < 1) setDeployLevel(1, true); }, 1400);
     }
     /* 部署型场景进入 06：点亮部署时间轴 T2（KV 重分配） */
-    if (stage.id === 'migrate' && deploying && onDeployCb) {
+    if (stage.id === 'migrate' && deploying && onDeployCb && !replaying) {
       later(function () { onDeployCb(2); }, 2200);
     }
     var fn = ANIMS[stage.anim.type];
@@ -1106,10 +1137,41 @@ window.FLOW_SCENE = (function () {
     }
   }
 
+  /* ── 自适应重排：宿主尺寸变化（窗口缩放 / 页面切换）→
+     按 newW 重建场景并重放当前阶段，始终铺满舞台不留白 ── */
+  function rebuild() {
+    if (!host) return;
+    clear();
+    if (svg && svg.parentNode) svg.parentNode.removeChild(svg);
+    root = {};
+    build();
+    var lv = Math.max(0, deployLv);
+    deployLv = -1;                 // 强制重建硬件（新 SVG 里没有任何 CXL 部件）
+    setDeployLevel(lv, false);
+    if (lastPlay) play(lastPlay.stage, lastPlay.sc, true);
+  }
+
+  var refitTimer = null;
+  function maybeRefit() {
+    if (!host || host.clientWidth < 140 || host.clientHeight < 140) return;
+    var nw = fitW();
+    if (Math.abs(nw - W) < 30) return;
+    if (refitTimer) clearTimeout(refitTimer);
+    refitTimer = setTimeout(function () { refitTimer = null; rebuild(); }, 200);
+  }
+  function watchResize() {
+    if (window.ResizeObserver) {
+      try { new ResizeObserver(maybeRefit).observe(host); } catch (e) { window.addEventListener('resize', maybeRefit); }
+    } else {
+      window.addEventListener('resize', maybeRefit);
+    }
+  }
+
   function mount(h, opts) {
     host = h;
     onSelect = (opts && opts.onSelect) || null;
     onDeployCb = (opts && opts.onDeploy) || null;
+    watchResize();
     build();
     setDeployLevel(0, false);
   }
@@ -1130,6 +1192,7 @@ window.FLOW_SCENE = (function () {
     rackIdxOf: rackIdxOf, nodeAnchor: nodeAnchor, mhdAnchor: mhdAnchor,
     setDeployLevel: setDeployLevel, deployLevel: deployLevel,
     setAutoDeploy: function (on) { autoDeploy = !!on; },
-    setShowCand: function (on) { showCand = !!on; }
+    setShowCand: function (on) { showCand = !!on; },
+    _refit: function () { maybeRefit(); }
   };
 })();
