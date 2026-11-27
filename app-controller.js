@@ -205,8 +205,8 @@
     const m = S.computeMetrics();
     const map = {
       overview: ['CLUSTER TOPOLOGY · LEAF-SPINE RDMA', `4 RACKS · ${st.count} CXL RACKS · ${st.units} MHD · AVG ${S.fmtNs(m.avgNs)}`],
-      rack: ['HARDWARE TOPOLOGY · ' + ({dissect:'RACK DISSECT · 4 SERVERS + 1 MHD',physical:'PHYSICAL RACK',network:'LEAF-SPINE',threeD:'ISOMETRIC',pipeline:'INFERENCE PIPELINE'}[STATE.hwView]||'PHYSICAL RACK'),
-             STATE.selectedRack + ' · ' + ({dissect:'全局拓扑 + 点击悬浮解剖 + 器件作用点',physical:'U位 / 端口 / CXL连接',network:'RDMA + 机架内CXL',threeD:'4 RACKS · 可旋转',pipeline:'GPU/HBM · KV 生命周期'}[STATE.hwView]||'')],
+      rack: ['HARDWARE LAB · ' + ({dissect:'3D RACK ANATOMY',physical:'U-POSITION DOSSIER',network:'LEAF-SPINE',pipeline:'INFERENCE PIPELINE'}[STATE.hwView]||'3D RACK ANATOMY'),
+             STATE.selectedRack + ' · ' + ({dissect:'机房 → 机架 → 设备 → 器件',physical:'U 位 / 端口 / CXL 连接',network:'RDMA + 机架内 CXL',pipeline:'GPU / HBM · KV 生命周期'}[STATE.hwView]||'')],
       kv: ['KV CACHE DISTRIBUTION', 'CXL MHD vs RDMA POOL · 示意'],
       traffic: ['RDMA ACCESS PATHS · LINK LOAD', 'SCENARIO ' + STATE.scenario],
       compare: ['DEPLOYMENT COMPARISON', 'A / B / C 方案对比']
@@ -422,11 +422,11 @@
   // 硬件拓扑工作台：视角切换 / 端口级连接 / 路径高亮 / 端口配置
   // ============================================================
   APP.switchHWView = function (view) {
-    if (!['dissect','physical','network','threeD','pipeline'].includes(view)) return;
+    if (!['dissect','physical','network','pipeline'].includes(view)) return;
     STATE.hwView = view;
     STATE.activePort = null;
     STATE.pathHighlight = null;
-    log('硬件视图 → ' + {dissect:'机架解剖三维表征',physical:'机架物理视图',network:'网络拓扑视图',threeD:'集群三维视图',pipeline:'推理管线视图'}[view], true);
+    log('硬件视图 → ' + {dissect:'三维硬件工作台',physical:'U 位与端口档案',network:'网络拓扑视图',pipeline:'推理管线视图'}[view], true);
     APP.render();
   };
   APP.rotate3D = function (delta) {
@@ -879,7 +879,7 @@
     if (p && ['run','overview','rack','kv','traffic','lc','compare'].includes(p)) STATE.page = p;
     if (p === 'lc' && window.__RENDER_LC__) { const lcs = params.get('lcsc'); if (lcs) STATE.lc = { scene: lcs, step: 0, playing: false }; }
     const hv = params.get('hwview');
-    if (hv && ['dissect','physical','network','threeD','pipeline'].includes(hv)) STATE.hwView = hv;
+    if (hv && ['dissect','physical','network','pipeline'].includes(hv)) STATE.hwView = hv;
     const ov = params.get('oview');
     if (ov === '2d' || ov === '3d') STATE.oview = ov;
     const want3d = params.get('v3d') === '1';

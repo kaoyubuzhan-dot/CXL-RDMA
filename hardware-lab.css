@@ -1,5 +1,6 @@
 .hl-ui{position:absolute;inset:0;pointer-events:none;font-family:var(--cn);color:#e7edf2}
 .hl-toolbar{position:absolute;top:52px;left:16px;right:16px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:auto}
+.hl-path{position:absolute;top:104px;left:18px;padding:7px 10px;background:#101923df;border-left:2px solid #80b9a2;color:#c9d5dc;font-size:13px;letter-spacing:.03em}
 .hl-ui button{border:1px solid #526575;background:#18232e;color:#eef4fa;border-radius:5px;padding:8px 12px;font:inherit;font-size:14px;cursor:pointer}
 .hl-ui button:hover,.hl-ui button.active{background:#294851;border-color:#81b9b0}
 .hl-ui button:focus-visible{outline:2px solid #c6e8fd;outline-offset:3px}
@@ -13,6 +14,11 @@
 
 #app[data-page="rack"] #stage-hint{display:none}
 #app[data-page="rack"] .stage>.disclaimer{display:none}
+#app.hl-focus[data-page="rack"]{grid-template-columns:1fr;grid-template-rows:var(--topbar) 1fr}
+#app.hl-focus[data-page="rack"] .side,#app.hl-focus[data-page="rack"] .console{display:none}
+#app.hl-focus[data-page="rack"] .stage{grid-column:1;grid-row:2}
+#app.hl-focus[data-page="rack"] .hl-toolbar{top:16px}
+#app.hl-focus[data-page="rack"] .hl-path{top:66px}
 
 @media(max-width:980px){
  .app[data-page="rack"],.app[data-page="overview"]{grid-template-columns:1fr;grid-template-rows:70px 1fr 0}
