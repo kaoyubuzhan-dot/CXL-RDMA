@@ -65,84 +65,154 @@
   }
 
   function slimRack(id) {
-    var g = new THREE.Group(), pos = RACK_POS[id], cxl = !!CXL_RACKS[id], pw = .04, i, k;
+    var g = new THREE.Group(), pos = RACK_POS[id], cxl = !!CXL_RACKS[id], pw = .042, i, k;
 
+    /* 4 根重型冷轧钢 C 型角立柱（工业级数据中心机柜机架立柱） */
     [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (s) {
-      var p = U.box(pw, RH, pw, 'frame');
-      p.position.set(s[0] * (RW / 2 - pw / 2) * .94, RH / 2, s[1] * (RD / 2 - pw / 2) * .94);
-      g.add(p);
-    });
-    var cap = U.boxE(RW, .04, RD, 'frame', { color: 0x7fa2b5, opacity: .55 }); cap.position.y = RH - .02; g.add(cap);
-    var base = U.boxE(RW, .05, RD, 'frameDark', { color: 0x6f93a6, opacity: .5 }); base.position.y = .025; g.add(base);
-    var back = U.boxE(RW - .02, RH - .1, .006, 'glass', { color: 0x63a8bd, opacity: .22 });
-    back.position.set(0, RH / 2, -RD / 2 + .01); g.add(back);
-    [-1, 1].forEach(function (s) {
-      var sd = U.boxE(.006, RH - .1, RD - .02, 'glass', { color: 0x63a8bd, opacity: .18 });
-      sd.position.set(s * (RW / 2 - .01), RH / 2, 0); g.add(sd);
+      var col = new THREE.Group();
+      var p = U.box(pw, RH, pw, 'frameDark');
+      p.position.set(0, RH / 2, 0);
+      col.add(p);
+      // 立柱安装方孔冲压饰条
+      var holes = [];
+      for (var u = 0; u < 28; u++) {
+        holes.push({ p: [s[0] > 0 ? -pw * .35 : pw * .35, .08 + u * (RH - .16) / 28, pw * .48] });
+      }
+      col.add(U.inst(U.geoBox(.008, .012, .003), 'hole', holes));
+      col.position.set(s[0] * (RW / 2 - pw / 2) * .96, 0, s[1] * (RD / 2 - pw / 2) * .96);
+      g.add(col);
     });
 
-    /* 4 台 4U 服务器 + 前面板 + LED */
-    var shell = [], bays = [], leds = [], nodeY = {};
+    /* 机柜顶盖与走线口 */
+    var cap = U.boxE(RW + .02, .036, RD + .02, 'frame', { color: 0x222d36, opacity: 1 });
+    cap.position.y = RH - .018; g.add(cap);
+    // 顶部走线开孔毛刷口
+    var topCut = U.box(RW * .6, .01, .06, 'hole');
+    topCut.position.set(0, RH - .001, -RD * .25); g.add(topCut);
+
+    /* 机柜重型承重底座与地脚 */
+    var base = U.boxE(RW + .02, .055, RD + .02, 'frameDark', { color: 0x11171d, opacity: 1 });
+    base.position.y = .0275; g.add(base);
+    var feet = [];
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (s) {
+      feet.push({ p: [s[0] * (RW / 2 - .03), .01, s[1] * (RD / 2 - .03)] });
+    });
+    g.add(U.inst(U.geoCyl(.022, .02, 12), 'steel', feet));
+
+    /* 侧面实体防静电冷轧钢侧护板（带内凹冲压肋条与锁扣凹槽，彻底去除廉价塑料玻璃感） */
+    [-1, 1].forEach(function (s) {
+      var sideGroup = new THREE.Group();
+      var panel = U.boxE(.008, RH - .1, RD - .03, 'frameDark', { color: 0x141b22, opacity: 1 });
+      panel.position.set(0, RH / 2, 0);
+      sideGroup.add(panel);
+      // 侧板内凹加强筋与锁扣
+      var rib = U.box(.003, RH * .7, RD * .55, 'chassis');
+      rib.position.set(s * .005, RH / 2, 0);
+      sideGroup.add(rib);
+      var lock = U.box(.01, .06, .03, 'steel');
+      lock.position.set(s * .006, RH / 2, RD * .3);
+      sideGroup.add(lock);
+      sideGroup.position.set(s * (RW / 2 - .004), 0, 0);
+      g.add(sideGroup);
+    });
+
+    /* 背面蜂窝散热冲孔护网 */
+    var back = U.boxE(RW - .03, RH - .1, .006, 'mesh', { color: 0x121a22, opacity: .88 });
+    back.position.set(0, RH / 2, -RD / 2 + .008); g.add(back);
+
+    /* 4 台 4U 高性能 GPU 服务器 + 真实前面板 + 硬盘抽屉托架 + 耳挂 + LED */
+    var shell = [], bays = [], baysGold = [], leds = [], ears = [], nodeY = {};
     [7, 11, 15, 19].forEach(function (u, i) {
       var ym = .056 + (u - 1) * UH + 2 * UH;
-      shell.push({ p: [0, ym, .04] });
+      shell.push({ p: [0, ym, .02] });
       nodeY['N' + (i + 1)] = ym;
-      for (var b = 0; b < 10; b++) bays.push({ p: [-.16 + b * .0355, ym + .008, RD / 2 - .045] });
-      leds.push({ p: [.215, ym + .006, RD / 2 - .042] });
+      // 左右 19" 挂耳片
+      ears.push({ p: [-(RW / 2 - .022), ym, RD / 2 - .028] });
+      ears.push({ p: [RW / 2 - .022, ym, RD / 2 - .028] });
+      // 12 块 2.5 寸热插拔托架
+      for (var b = 0; b < 12; b++) {
+        var bx = -.18 + b * .031;
+        bays.push({ p: [bx, ym + .005, RD / 2 - .038] });
+        baysGold.push({ p: [bx, ym - .024, RD / 2 - .035] });
+      }
+      // 状态指示灯
+      leds.push({ p: [.215, ym + .018, RD / 2 - .036] });
+      leds.push({ p: [.215, ym + .002, RD / 2 - .036] });
     });
-    g.add(U.inst(U.geoBox(RW - .12, 4 * UH - .006, RD - .1), 'chassis', shell));
-    g.add(U.inst(U.geoBox(.03, .02, .006), 'tray', bays));
-    g.add(U.inst(U.geoBox(.008, .006, .003), 'ledGreen', leds));
+    g.add(U.inst(U.geoBox(RW - .08, 4 * UH - .008, RD - .08), 'chassis', shell));
+    g.add(U.inst(U.geoBox(.018, 4 * UH - .01, .012), 'steel', ears));
+    g.add(U.inst(U.geoBox(.027, 4 * UH * .55, .008), 'tray', bays));
+    g.add(U.inst(U.geoBox(.024, .005, .005), 'goldBright', baysGold));
+    g.add(U.inst(U.geoBox(.007, .005, .003), 'ledGreen', leds));
 
-    /* ToR */
-    var tor = U.boxE(RW - .1, .04, RD * .5, 'switchBody', { color: 0x5f9fe8, opacity: .55 });
+    /* ToR 交换机（带前面板 400G QSFP-DD 端口屏蔽笼） */
+    var tor = U.boxE(RW - .06, .042, RD * .55, 'switchBody', { color: 0x1d3345, opacity: 1 });
     tor.position.set(0, .056 + 40 * UH, 0); g.add(tor);
+    var torPorts = [];
+    for (i = 0; i < 16; i++) torPorts.push({ p: [-.18 + i * .024, .056 + 40 * UH, RD * .275 + .002] });
+    g.add(U.inst(U.geoBox(.016, .012, .008), 'shield', torPorts));
 
     /* MHD / 空槽盲板：每台机架同时构建 CXL 硬件组与盲板组，
-       由 setDeploy 按部署状态切换显隐（带生长动画）——
-       这样"增量部署决策"变化时 2D / 3D 两个视图能一起变 */
+       由 setDeploy 按部署状态切换显隐（带平滑生长动画） */
     var mhdY = .056 + 22 * UH + UH / 2;
     var gx = new THREE.Group();          // CXL 硬件组（MHD + Switch + 连线 + 容量条 + 标签）
     gx.scale.y = .001; gx.visible = false;
-    var gb = new THREE.Group();          // RDMA-only 盲板组
+    var gb = new THREE.Group();          // RDMA-only 通风盲板组
     if (true) {
-      var mh = U.boxE(RW - .12, 3 * UH - .006, RD - .14, 'mhdUnit', { color: 0x53e3c4, opacity: .58 });
-      mh.userData.mesh.material.emissive.setHex(C.cxl);
-      mh.userData.mesh.material.emissiveIntensity = .42;
-      mh.position.set(0, mhdY, .04); gx.add(mh);
+      // 共享 CXL-MHD 内存池单元机箱（极具科技感的阳极氧化青绿拉丝）
+      var mh = U.boxE(RW - .08, 3 * UH - .006, RD - .1, 'mhdUnit', { color: 0x0f4239, opacity: 1 });
+      mh.userData.mesh.material.emissive.setHex(0x063028);
+      mh.userData.mesh.material.emissiveIntensity = .55;
+      mh.position.set(0, mhdY, .02); gx.add(mh);
+
+      // 3 个热插拔内存抽屉面板与把手
+      var drawers = [], handles = [];
+      for (i = 0; i < 3; i++) {
+        var dx = -.14 + i * .14;
+        drawers.push({ p: [dx, mhdY, RD / 2 - .038] });
+        handles.push({ p: [dx, mhdY, RD / 2 - .032] });
+      }
+      gx.add(U.inst(U.geoBox(.12, 3 * UH * .75, .008), 'mhdFrame', drawers));
+      gx.add(U.inst(U.geoBox(.06, .012, .01), 'steel', handles));
+
       var ml = [];
-      for (i = 0; i < 4; i++) ml.push({ p: [-.14 + i * .07, mhdY, RD / 2 - .042] });
-      gx.add(U.inst(U.geoBox(.01, .006, .003), 'ledCxl', ml));
+      for (i = 0; i < 6; i++) ml.push({ p: [-.16 + i * .064, mhdY - .032, RD / 2 - .035] });
+      gx.add(U.inst(U.geoBox(.009, .006, .003), 'ledCxl', ml));
 
-      /* CXL Switch：主机端口汇聚 → MHD（对应需求文档「连接数 ≠ 容量」） */
+      /* CXL Switch：1U 高速低延迟交换机 */
       var swY = .056 + 26 * UH;
-      var sw = U.boxE(RW - .16, 1.6 * UH, RD - .24, 'switchBody', { color: 0x53e3c4, opacity: .82 });
-      sw.position.set(0, swY, .02); gx.add(sw);
-      var swLeds = [];
-      for (i = 0; i < 6; i++) swLeds.push({ p: [-.13 + i * .052, swY + .014, RD / 2 - .1] });
-      gx.add(U.inst(U.geoBox(.008, .005, .003), 'ledCxl', swLeds));
+      var sw = U.boxE(RW - .09, 1.6 * UH, RD - .2, 'switchBody', { color: 0x113b33, opacity: 1 });
+      sw.position.set(0, swY, .01); gx.add(sw);
+      var swPorts = [], swLeds = [];
+      for (i = 0; i < 8; i++) {
+        swPorts.push({ p: [-.16 + i * .046, swY, RD / 2 - .09] });
+        swLeds.push({ p: [-.16 + i * .046, swY + .018, RD / 2 - .088] });
+      }
+      gx.add(U.inst(U.geoBox(.024, .014, .01), 'shield', swPorts));
+      gx.add(U.inst(U.geoBox(.007, .005, .003), 'ledCxl', swLeds));
 
-      /* 主机端口连线：MHD ↔ Switch（4 条，示意 2 个主机口 × 2 条链路） */
+      /* 主机端口高速连线：MHD ↔ CXL Switch（真实 DAC 线缆弧度） */
       var cables = [];
-      for (i = 0; i < 4; i++) cables.push({ p: [-.12 + i * .08, .056 + 24.55 * UH, .3] });
-      gx.add(U.inst(U.geoBox(.012, 1.02 * UH, .012), 'ledCxl', cables));
+      for (i = 0; i < 4; i++) cables.push({ p: [-.12 + i * .08, .056 + 24.55 * UH, .28] });
+      gx.add(U.inst(U.geoBox(.014, 1.02 * UH, .014), 'ledCxl', cables));
 
       /* MHD 容量条：R1 约 320/512，R3 约 192/512 */
       var capW = RW - .18;
       var usedR = (id === 'R3') ? .375 : .625;
-      var capBg = U.box(capW, .014, .004, 'frameDark');
+      var capBg = U.box(capW, .016, .006, 'frameDark');
       capBg.position.set(0, mhdY - 1.16 * UH, RD / 2 - .012); gx.add(capBg);
-      var capFill = U.box(capW * usedR, .014, .006, 'ledCxl');
+      var capFill = U.box(capW * usedR, .016, .008, 'ledCxl');
       capFill.position.set(-capW * (1 - usedR) / 2, mhdY - 1.16 * UH, RD / 2 - .009); gx.add(capFill);
-      var mhdTag = U.decal('MHD ' + (id === 'R3' ? '192' : '320') + '/512', .24, .032, '#c9fff2', 30);
-      mhdTag.position.set(0, mhdY + .062, RD / 2 - .006); gx.add(mhdTag);
-      var tagBg = U.box(.27, .046, .003, 'frameDark');
-      tagBg.position.set(0, mhdY + .059, RD / 2 - .012); gx.add(tagBg);
+      var mhdTag = U.decal('MHD ' + (id === 'R3' ? '192' : '320') + '/512 GB', .24, .034, '#85ffdf', 30);
+      mhdTag.position.set(0, mhdY + .065, RD / 2 - .006); gx.add(mhdTag);
+      var tagBg = U.box(.28, .048, .003, 'frameDark');
+      tagBg.position.set(0, mhdY + .062, RD / 2 - .012); gx.add(tagBg);
     }
     {
+      // 纯 RDMA 机架的工业通风盲板
       var blk = [];
-      for (var u = 23; u <= 25; u++) blk.push({ p: [0, .056 + (u - 1) * UH + UH / 2, RD / 2 - .05] });
-      gb.add(U.inst(U.geoBox(RW - .13, .032, .006), 'frameDark', blk));
+      for (var u = 23; u <= 25; u++) blk.push({ p: [0, .056 + (u - 1) * UH + UH / 2, RD / 2 - .042] });
+      gb.add(U.inst(U.geoBox(RW - .09, .034, .008), 'blank', blk));
     }
     g.add(gx); g.add(gb);
     gx.visible = !!cxl; gx.scale.y = cxl ? 1 : .001;
@@ -156,15 +226,15 @@
       var hit = false;
       for (k = 0; k < used.length; k++) if (uu >= used[k][0] && uu <= used[k][1]) { hit = true; break; }
       if (hit) continue;
-      blanks.push({ p: [0, .056 + (uu - 1) * UH + UH / 2, RD / 2 - .05] });
+      blanks.push({ p: [0, .056 + (uu - 1) * UH + UH / 2, RD / 2 - .042] });
     }
-    if (blanks.length) g.add(U.inst(U.geoBox(RW - .14, .03, .005), 'frameDark', blanks));
+    if (blanks.length) g.add(U.inst(U.geoBox(RW - .1, .032, .006), 'blank', blanks));
 
-    /* 机架标签：CXL / RDMA-only 两套，随部署状态切换 */
-    var tagC = U.decal(id + ' · CXL+RDMA', .3, .055, '#7ff0d3', 28);
-    tagC.position.set(0, RH + .1, .26); g.add(tagC);
-    var tagR = U.decal(id + ' · RDMA-only', .3, .055, '#8fb9c6', 28);
-    tagR.position.set(0, RH + .1, .26); g.add(tagR);
+    /* 机架顶部金属技术标签：CXL+RDMA / RDMA-only 两套 */
+    var tagC = U.decal(id + ' · CXL + RDMA', .34, .06, '#64ffd8', 28);
+    tagC.position.set(0, RH + .12, .26); g.add(tagC);
+    var tagR = U.decal(id + ' · RDMA ONLY', .34, .06, '#93c5fd', 28);
+    tagR.position.set(0, RH + .12, .26); g.add(tagR);
     tagC.visible = !!cxl; tagR.visible = !cxl;
     g.userData.tagC = tagC; g.userData.tagR = tagR;
 
@@ -202,14 +272,14 @@
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     if (THREE.sRGBEncoding != null && 'outputEncoding' in renderer) renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.toneMappingExposure = 1.15;
     host.appendChild(renderer.domElement);
 
     scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x050b10, .048);
+    scene.fog = new THREE.FogExp2(0x04080c, .042);
     envMap = U.makeEnv(renderer);
     scene.environment = envMap;
-    if ('environmentIntensity' in scene) scene.environmentIntensity = .6;
+    if ('environmentIntensity' in scene) scene.environmentIntensity = .85;
 
     camera = new THREE.PerspectiveCamera(34, 1, .05, 80);
     camera.position.set(5.4, 4.1, 6.2);
@@ -222,25 +292,35 @@
     controls.maxPolarAngle = M.PI * .49;
     controls.update();
 
-    scene.add(new THREE.HemisphereLight(0x2a4a5c, 0x04080c, .7));
-    var key = new THREE.DirectionalLight(0xcfe9ff, 1.8);
-    key.position.set(4, 8, 5);
+    scene.add(new THREE.HemisphereLight(0x35586c, 0x05090e, .85));
+    // 机房主冷白条形吸顶灯光阵列
+    var key = new THREE.DirectionalLight(0xdff0ff, 2.4);
+    key.position.set(3.8, 8.5, 4.8);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
     key.shadow.bias = -.0015;
     var sc = key.shadow.camera; sc.left = -5; sc.right = 5; sc.top = 5; sc.bottom = -5; sc.far = 24;
     scene.add(key);
-    var warm = new THREE.DirectionalLight(C.move, .38); warm.position.set(-6, 3, -5); scene.add(warm);
-    var ctl = new THREE.PointLight(C.cyan, 2.2, 7, 2); ctl.position.set(0, CTRL_Y + .2, 0); scene.add(ctl);
+    var keyBack = new THREE.DirectionalLight(0x9fc8e8, 1.2);
+    keyBack.position.set(-4.5, 7.5, -4.5);
+    scene.add(keyBack);
 
-    var floor = new THREE.Mesh(new THREE.PlaneGeometry(20, 20),
-      new THREE.MeshStandardMaterial({ color: 0x04090d, metalness: .3, roughness: .85 }));
+    var warm = new THREE.DirectionalLight(C.move, .45); warm.position.set(-6, 3, -5); scene.add(warm);
+    var ctl = new THREE.PointLight(C.cyan, 2.5, 8, 2); ctl.position.set(0, CTRL_Y + .2, 0); scene.add(ctl);
+
+    /* 真实数据中心 600mm 防静电高架地坪系统 */
+    var floorMat = new THREE.MeshStandardMaterial({
+      map: U.TEX.floorTile,
+      roughness: .45,
+      metalness: .42,
+      envMapIntensity: 1.2
+    });
+    var floor = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), floorMat);
     floor.rotation.x = -M.PI / 2; floor.receiveShadow = true; scene.add(floor);
-    var sheen = new THREE.Mesh(new THREE.PlaneGeometry(9, 9),
-      new THREE.MeshBasicMaterial({ map: U.floorTexture(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: .5 }));
+
+    var sheen = new THREE.Mesh(new THREE.PlaneGeometry(10, 10),
+      new THREE.MeshBasicMaterial({ map: U.floorTexture(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: .55 }));
     sheen.rotation.x = -M.PI / 2; sheen.position.y = .001; scene.add(sheen);
-    var grid = new THREE.GridHelper(16, 32, 0x1c4050, 0x0b1922);
-    grid.position.y = .002; grid.material.transparent = true; grid.material.opacity = .3; scene.add(grid);
 
     root = new THREE.Group(); scene.add(root);
     fx = new THREE.Group(); scene.add(fx);
@@ -251,6 +331,30 @@
     ['R1', 'R2', 'R3', 'R4'].forEach(function (id) {
       var r = slimRack(id); root.add(r); rackBodies[id] = r;
     });
+
+    /* 数据中心机房高架走线槽道与桥架系统（Fiber Cable Runway & Trays） */
+    var trayGroup = new THREE.Group();
+    var trayY = RH + .14;
+    // 横向连接 R1-R2 与 R3-R4 的走线桥架（双通道）
+    [RACK_POS.R1.z, RACK_POS.R3.z].forEach(function (z) {
+      // 黄色光纤走线槽底板与护边
+      var tBase = U.boxE(2.8, .014, .2, 'frameDark', { color: 0xd49b28, opacity: .95 });
+      tBase.position.set(0, trayY, z - .15);
+      trayGroup.add(tBase);
+      // 金属吊架立杆
+      [-1.35, 0, 1.35].forEach(function (tx) {
+        var hanger = U.box(.016, .35, .016, 'steel');
+        hanger.position.set(tx, trayY + .175, z - .15);
+        trayGroup.add(hanger);
+      });
+    });
+    // 纵向连接 R1-R3 与 R2-R4 的光纤通道
+    [RACK_POS.R1.x, RACK_POS.R2.x].forEach(function (x) {
+      var tCross = U.boxE(.2, .014, 2.4, 'frameDark', { color: 0xd49b28, opacity: .95 });
+      tCross.position.set(x, trayY + .01, 0);
+      trayGroup.add(tCross);
+    });
+    root.add(trayGroup);
 
     /* Spine */
     endpoints.SPINE = new THREE.Vector3(0, SPINE_Y, 0);

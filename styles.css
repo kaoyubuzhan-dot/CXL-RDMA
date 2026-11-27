@@ -666,9 +666,10 @@ button:focus-visible,input:focus-visible{outline:1px solid var(--accent);outline
 #gllc canvas{display:block;width:100%;height:100%}
 .app[data-page="lc"] #gllc{display:block}
 .gll-labels{position:absolute;inset:0;z-index:4;pointer-events:none}
-.gll-lbl{position:absolute;transform:translate(-50%,-140%);font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;
-  color:#9fc3d2;background:rgba(5,11,17,.6);border:1px solid rgba(167,197,215,.16);padding:1px 7px;border-radius:1px;
-  text-shadow:0 2px 10px rgba(0,0,0,.9);transition:color .2s,border-color .2s}
+.gll-lbl{position:absolute;transform:translate(-50%,-140%);font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;white-space:nowrap;
+  color:#9fc3d2;background:rgba(4,9,14,.85);border:1px solid rgba(167,197,215,.24);padding:2px 8px;border-radius:2px;
+  backdrop-filter:blur(4px);box-shadow:0 4px 12px rgba(0,0,0,.6);
+  text-shadow:0 1px 4px rgba(0,0,0,.9);transition:color .2s,border-color .2s}
 .gll-lbl.sel{color:#08161a;background:#53e3c4;border-color:#53e3c4}
 
 /* 顶部：阶段导航 + 镜头 */

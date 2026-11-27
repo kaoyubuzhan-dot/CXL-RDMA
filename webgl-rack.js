@@ -90,14 +90,14 @@
     controls.update();
     controls.addEventListener('start', function () { userMoved = true; });
 
-    /* 环境反射：手绘贴图 → PMREM（金属高光的关键，不引外部资源） */
+    /* 环境反射：升级后的专业数据中心条形光源 HDR 环境贴图 */
     envMap = U.makeEnv(renderer);
     scene.environment = envMap;
-    if ('environmentIntensity' in scene) scene.environmentIntensity = .62;
+    if ('environmentIntensity' in scene) scene.environmentIntensity = .82;
 
-    scene.add(new THREE.HemisphereLight(0x2a4a5c, 0x05090e, .62));
-    const key = new THREE.DirectionalLight(0xcfe9ff, 2.1);
-    key.position.set(3.2, 5.2, 3.4);
+    scene.add(new THREE.HemisphereLight(0x355468, 0x05090e, .78));
+    const key = new THREE.DirectionalLight(0xdcf0ff, 2.6);
+    key.position.set(3.6, 5.8, 3.8);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
     key.shadow.camera.near = .5; key.shadow.camera.far = 16;
@@ -105,14 +105,25 @@
     key.shadow.camera.top = 4.4; key.shadow.camera.bottom = -1;
     key.shadow.bias = -.0015;
     scene.add(key);
-    const warm = new THREE.DirectionalLight(C.amber, .55);
+    const keyBack = new THREE.DirectionalLight(0x8ebcd8, 1.2);
+    keyBack.position.set(-3.8, 4.2, -3.2);
+    scene.add(keyBack);
+
+    const warm = new THREE.DirectionalLight(C.amber, .45);
     warm.position.set(-4.2, 2.6, -3.6); scene.add(warm);
-    const rimA = new THREE.PointLight(C.cxl, 1.1, 6, 2); rimA.position.set(-1.5, 1.5, 1.4); scene.add(rimA);
-    const rimB = new THREE.PointLight(C.rdma, .7, 6, 2); rimB.position.set(1.8, 2.3, -1.2); scene.add(rimB);
+    const rimA = new THREE.PointLight(C.cxl, 1.3, 6, 2); rimA.position.set(-1.5, 1.5, 1.4); scene.add(rimA);
+    const rimB = new THREE.PointLight(C.rdma, .9, 6, 2); rimB.position.set(1.8, 2.3, -1.2); scene.add(rimB);
 
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(4.2, 64),
-      new THREE.MeshStandardMaterial({ color: 0x03070a, metalness: .25, roughness: .92, transparent: true, opacity: .96 })
+      new THREE.MeshStandardMaterial({
+        color: 0x050b0f,
+        metalness: .45,
+        roughness: .52,
+        transparent: true,
+        opacity: .96,
+        envMapIntensity: 1.1
+      })
     );
     floor.rotation.x = -M.PI / 2; floor.position.y = -.002; floor.receiveShadow = true;
     scene.add(floor);
