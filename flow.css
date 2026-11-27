@@ -378,3 +378,41 @@
   display:grid;grid-template-columns:1fr 1fr;gap:3px;padding:4px;margin-bottom:6px}
 #boot .boot-mark span{border:1px solid rgba(var(--cxl-rgb),.35)}
 #boot .boot-mark span:nth-child(1),#boot .boot-mark span:nth-child(4){border-color:var(--cxl)}
+
+/* ============================================================
+ * v3 · 全局视觉语义统一 + 局部性判定 + 候选否决 + 策略对比
+ *   RDMA 访问流 = 橙红粗实线（仅作用于运行流程页 SVG）
+ *   复制分发流 = 浅蓝虚线（一次性准备）
+ *   候选否决链路 = 灰虚线 + 叉
+ *   背景并发负载 = 节点常驻微弱脉冲
+ * ============================================================ */
+#flow-svg .fx-link--rdma{stroke:rgba(240,120,90,.5)}
+#flow-svg .fx-link--rdma.is-flow{stroke:#f0785a;stroke-width:2}
+.fx-dot--rdma{fill:#f0785a}
+.fx-live-dot{fill:#e6a056;animation:fx-live 2.4s ease-in-out infinite}
+@keyframes fx-live{0%,100%{opacity:.16}50%{opacity:.7}}
+.fx-token--gold .fx-token-c{fill:#ffd76b;stroke:rgba(255,215,107,.65);filter:url(#flowGlow)}
+.fx-copy-path{fill:none;stroke:rgba(143,198,242,.8);stroke-width:1.6;stroke-dasharray:5 5;
+  animation:fx-dash 1.1s linear infinite;filter:url(#flowGlow)}
+.fx-cand-rej{fill:none;stroke:rgba(140,160,175,.55);stroke-width:1.1;stroke-dasharray:4 5}
+.fx-cand-acc{fill:none;stroke-width:1.8;filter:url(#flowGlow)}
+.fx-cand-x{stroke:#d0705f;stroke-width:1.8;fill:none}
+.fx-cand-lb{font-family:var(--mono);font-size:12.5px;fill:#a9bcc9}
+.fx-cand-lb--ok{fill:#53e3c4}
+.fx-branch-q{fill:rgba(163,139,242,.12);stroke:rgba(163,139,242,.55);stroke-width:1}
+.fx-branch-b{fill:rgba(15,28,37,.85);stroke:rgba(167,197,215,.2);stroke-width:.9;transition:.3s}
+.fx-branch.is-act .fx-branch-b{stroke:rgba(163,139,242,.85);fill:rgba(163,139,242,.14)}
+.fx-branch-link{stroke:rgba(167,197,215,.3);stroke-width:1;fill:none;transition:.3s}
+.fx-branch-link.is-act{stroke:rgba(163,139,242,.8);stroke-width:1.4}
+
+/* 底部控制台：辅助开关 */
+.fl-tgls{display:flex;gap:6px;flex:0 0 auto}
+.fl-tgl{font-family:var(--mono);font-size:10px;letter-spacing:.05em;color:var(--deep);
+  background:rgba(15,28,37,.5);border:1px solid rgba(167,197,215,.18);padding:4px 9px;cursor:pointer;transition:.2s}
+.fl-tgl:hover{border-color:rgba(var(--accent-rgb),.6)}
+.fl-tgl.is-on{color:var(--accent);border-color:rgba(var(--accent-rgb),.5);background:rgba(var(--accent-rgb),.08)}
+
+/* 右栏：策略对比面板 */
+.fl-mx-note{font-family:var(--cn);font-size:9.5px;line-height:1.5;color:var(--soft);cursor:help;
+  border-top:1px dashed rgba(167,197,215,.14);margin-top:6px;padding-top:6px}
+.fl-mx-fn{font-family:var(--cn);font-size:8.5px;color:var(--deep);margin-top:4px}

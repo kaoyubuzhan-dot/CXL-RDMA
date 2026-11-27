@@ -30,16 +30,19 @@ window.FLOW_SCENE = (function () {
     { id: 'profiler', zh: 'Workload Profiler', en: '访问局部性 / 热度画像' },
     { id: 'topo',     zh: 'Topology Monitor',  en: '节点 · CXL 可达性' },
     { id: 'place',    zh: 'Placement Controller', en: '候选位置比较 / 决策' },
+    { id: 'judge',    zh: 'Locality Judge',    en: '是否存在主力访问机架' },
     { id: 'dir',      zh: 'KV Directory',     en: '逻辑 ID → 物理位置' }
   ];
 
   var svg = null, host = null, root = {}, onSelect = null;
   var actors = [], raf = null, t0 = 0, timers = [];
   var curSc = null;
-  /* CXL 增量部署等级：0=T0 全RDMA · 1=T1 R1部署 · 2=T2 R3部署 · 3=T3 重分配 */
+  /* CXL 增量部署等级：0=T0 全RDMA · 1=T1 R1+R3 同批部署 */
   var deployLv = -1, onDeployCb = null;
   /* 自动模式：Controller 按决策在阶段内自动触发部署；手动模式：等待用户点击部署时间轴 */
   var autoDeploy = true;
+  /* 候选否决链路开关（灰虚线 + 叉）：可在底部控制台一键隐藏 */
+  var showCand = true;
 
   function later(fn, ms) { var id = setTimeout(fn, ms); timers.push(id); return id; }
 
@@ -78,6 +81,15 @@ window.FLOW_SCENE = (function () {
   function fabricIn(i) { return { x: rackTop(i).x, y: L.fabric.y + L.fabric.h }; }
   function poolAnchor() { return { x: L.pool.x + L.pool.w / 2, y: L.pool.y }; }
   function busXOf(i) { return rackX(i) + NODE_X + NODE_W + 12; }
+  function pth(pts) {
+    var d = 'M' + pts[0].x + ',' + pts[0].y;
+    for (var i = 1; i < pts.length; i++) d += ' L' + pts[i].x + ',' + pts[i].y;
+    return d;
+  }
+  /* 后台并发负载脉冲点：每个节点常驻微弱脉冲 = 全集群持续推理 */
+  function liveDot(x, y, parent) {
+    el('circle', { cx: x, cy: y, r: 2.1, class: 'fx-live-dot' }, parent);
+  }
 
   /* ───────────── 构建静态场景 ───────────── */
   function build() {
@@ -174,6 +186,7 @@ window.FLOW_SCENE = (function () {
         txt(nd.role, { x: x + NODE_X + 9, y: ny + 40, class: 'fx-t3' }, ng);
         el('rect', { x: x + NODE_X + 84, y: ny + 31, width: 40, height: 18, rx: 1, class: 'fx-hbm', 'data-slot': rk.id + '-' + nd.id }, ng);
         txt('HBM', { x: x + NODE_X + 104, y: ny + 44, class: 'fx-t4', 'text-anchor': 'middle' }, ng);
+        liveDot(x + NODE_X + NODE_W - 6, ny + 8, ng);
       });
 
       el('circle', { cx: x + L.rack.w / 2, cy: L.rack.y - 4, r: 2.4, class: 'fx-dot fx-dot--rdma' }, g);
@@ -291,15 +304,15 @@ window.FLOW_SCENE = (function () {
     txt('控制平面 · 仅接收元数据', { x: c.x + 14, y: c.y + 33, class: 'fx-t4' }, g);
     root.ctrlCards = {};
     CTRL_CARDS.forEach(function (cd, i) {
-      var cy = c.y + 46 + i * 110;
+      var cy = c.y + 42 + i * 84;
       var cg = el('g', { class: 'ctrl-card', 'data-card': cd.id }, g);
-      el('rect', { x: c.x + 12, y: cy, width: c.w - 24, height: 92, rx: 2, class: 'fx-ctrl-card' }, cg);
-      el('rect', { x: c.x + 12, y: cy, width: 2, height: 92, class: 'fx-ctrl-edge' }, cg);
-      txt(cd.zh, { x: c.x + 24, y: cy + 26, class: 'fx-ctrl-t' }, cg);
-      txt(cd.en, { x: c.x + 24, y: cy + 42, class: 'fx-t4' }, cg);
-      var st = txt('IDLE', { x: c.x + 24, y: cy + 74, class: 'fx-ctrl-st' }, cg);
+      el('rect', { x: c.x + 12, y: cy, width: c.w - 24, height: 70, rx: 2, class: 'fx-ctrl-card' }, cg);
+      el('rect', { x: c.x + 12, y: cy, width: 2, height: 70, class: 'fx-ctrl-edge' }, cg);
+      txt(cd.zh, { x: c.x + 24, y: cy + 22, class: 'fx-ctrl-t' }, cg);
+      txt(cd.en, { x: c.x + 24, y: cy + 36, class: 'fx-t4' }, cg);
+      var st = txt('IDLE', { x: c.x + 24, y: cy + 56, class: 'fx-ctrl-st' }, cg);
       root.ctrlCards[cd.id] = { g: cg, st: st };
-      el('circle', { cx: c.x + 12, cy: cy + 46, r: 2.2, class: 'fx-dot fx-dot--ctl' }, cg);
+      el('circle', { cx: c.x + 12, cy: cy + 35, r: 2.2, class: 'fx-dot fx-dot--ctl' }, cg);
     });
   }
 
@@ -374,7 +387,9 @@ window.FLOW_SCENE = (function () {
     opts = opts || {};
     var sz = opts.size || 13;
     var g = el('g', { class: 'fx-token fx-token--' + kind });
-    var c = { kv: '#e6a056', rep: '#a38bf2', ctl: '#e4b66b', cxl: '#53e3c4', rdma: '#5f9fe8' }[kind] || '#e6a056';
+    var c = { kv: '#e6a056', rep: '#a38bf2', ctl: '#e4b66b', cxl: '#53e3c4', rdma: '#f0785a',
+              copy: '#8fc6f2', cand: '#8ca0af' }[kind] || '#e6a056';
+    if (opts.gold) { c = '#ffd76b'; g.classList.add('fx-token--gold'); }
     el('rect', { x: -sz / 2, y: -sz / 2, width: sz, height: sz, rx: 2, fill: c, class: 'fx-token-c' }, g);
     if (opts.label) {
       var t = el('text', { x: 0, y: -sz / 2 - 6, class: 'fx-token-l', 'text-anchor': 'middle' }, g);
@@ -430,6 +445,7 @@ window.FLOW_SCENE = (function () {
     Object.keys(root.ctrlCards || {}).forEach(function (k) { card(k, false, 'IDLE'); });
     document.querySelectorAll('.fx-tags .fx-callout').forEach(function (n) { n.remove(); });
     document.querySelectorAll('.fx-tags .fx-decision').forEach(function (n) { n.remove(); });
+    document.querySelectorAll('.fx-tags .fx-candset').forEach(function (n) { n.remove(); });
     document.querySelectorAll('.fx-node.is-hot, .fx-mhd.is-hot, .fx-hbm.is-hot, .fx-hbm.is-hit, .fx-mhd.is-cold, .fx-bar-fill.is-hit')
       .forEach(function (n) { n.classList.remove('is-hot', 'is-hit', 'is-cold'); });
   }
@@ -488,7 +504,7 @@ window.FLOW_SCENE = (function () {
     for (var i = 0; i < 4; i++) {
       (function (i) {
         var sx = p.x + 14 + (i % 2) * 9, sy = p.y + 6 + Math.floor(i / 2) * 9;
-        var t = token('kv', { x: sx, y: sy }, { size: 10 });
+        var t = token('kv', { x: sx, y: sy }, { size: 10, gold: true });
         move(t, [{ x: sx, y: sy }, { x: p.x - 44, y: p.y - 30 }], { dur: 900, delay: 160 * i, keep: true });
       })(i);
     }
@@ -580,7 +596,7 @@ window.FLOW_SCENE = (function () {
         var p = nodeAnchor(sc.prod.split('-')[0], sc.prod.split('-')[1]);
         var m = mhdAnchor('R1', 'MHD-1');
         var bx = busXOf(0);
-        var t = token('kv', { x: p.x, y: p.y }, { size: 12 });
+        var t = token('kv', { x: p.x, y: p.y }, { size: 12, gold: true });
         move(t, [{ x: p.x, y: p.y }, { x: bx, y: p.y }, { x: bx, y: m.y }, { x: m.x + 26, y: m.y }],
           { dur: 1600, keep: true });
         later(function () { hl('.mhd[data-pick="R1-MHD-1"] .fx-mhd', 'is-hot'); }, 1600);
@@ -610,9 +626,56 @@ window.FLOW_SCENE = (function () {
     later(function () { card('place', false, dep.length ? 'PLACED' : 'NO-DEPLOY'); }, 4600);
   }
 
+  /* ── 04 局部性判定（核心分叉点）：
+     信令汇聚 → Locality Judge 判定 → 分支图高亮本情景走向 ── */
+  function animLocality(sc) {
+    var c = L.ctrl, x1 = c.x + c.w / 2;
+    FLOW.RACKS.forEach(function (rk, i) {
+      var b = rackBottom(i);
+      var pts = [{ x: b.x, y: b.y }, { x: b.x, y: L.busY }, { x: x1, y: L.busY }, { x: x1, y: c.y + c.h }];
+      var t = token('ctl', { x: pts[0].x, y: pts[0].y }, { size: 7 });
+      move(t, pts, { dur: 1300, delay: 150 * i });
+      pulseLink('lnk-ctl-' + (i + 1), 'is-flow', 2000);
+    });
+    later(function () { card('judge', true, '判定中…'); }, 400);
+    later(function () { localityOverlay(sc); }, 700);
+    later(function () { card('judge', true, sc.verdict); }, 1500);
+  }
+
+  function localityOverlay(sc) {
+    var p = L.pool;
+    var x = p.x, y = p.y - 30, w = p.w, hh = 112;
+    var g = el('g', { class: 'fx-decision' }, root.tags);
+    el('rect', { x: x, y: y, width: w, height: hh, rx: 2, class: 'fx-dec-box' }, g);
+    el('rect', { x: x, y: y, width: 2, height: hh, fill: '#a38bf2' }, g);
+    txt('局部性判定 · LOCALITY JUDGE', { x: x + 14, y: y + 20, class: 'fx-t2' }, g);
+    txt('所有放置策略从这个判定点开始分流', { x: x + w - 14, y: y + 20, class: 'fx-t4', 'text-anchor': 'end', fill: '#8fa6b5' }, g);
+    var qy = y + 32, qh = 34, qx = x + 16, qw = 236;
+    el('rect', { x: qx, y: qy, width: qw, height: qh, rx: 2, class: 'fx-branch-q' }, g);
+    txt('这批 KV 是否存在明确的主力访问机架？', { x: qx + 12, y: qy + 22, class: 'fx-t3' }, g);
+    /* 分支：是（有主力） / 否（无主力），本情景走向高亮 */
+    var byY = qy, bnY = qy + 38, bx0 = qx + qw + 56, bw = w - (bx0 - x) - 16;
+    var yesTxt = '是 · 有主力 → ' + sc.verdict.replace(/^是 · /, '') + ' → 按 CXL / RDMA 收益匹配放置';
+    var noTxt = '否 · 无主力 → RDMA Pool 全网共享（S4 情景走向）';
+    var isYes = sc.verdict.indexOf('否') !== 0;
+    el('path', { d: 'M' + (qx + qw) + ',' + (qy + qh / 2) + ' C' + (qx + qw + 28) + ',' + (qy + qh / 2) +
+      ' ' + (qx + qw + 28) + ',' + (byY + 15) + ' ' + bx0 + ',' + (byY + 15),
+      class: 'fx-branch-link' + (isYes ? ' is-act' : '') }, g);
+    el('path', { d: 'M' + (qx + qw) + ',' + (qy + qh / 2) + ' C' + (qx + qw + 28) + ',' + (qy + qh / 2) +
+      ' ' + (qx + qw + 28) + ',' + (bnY + 15) + ' ' + bx0 + ',' + (bnY + 15),
+      class: 'fx-branch-link' + (!isYes ? ' is-act' : '') }, g);
+    var by = el('g', { class: 'fx-branch' + (isYes ? ' is-act' : '') }, g);
+    el('rect', { x: bx0, y: byY, width: bw, height: 30, rx: 2, class: 'fx-branch-b' }, by);
+    txt(yesTxt, { x: bx0 + 12, y: byY + 20, class: 'fx-t4' }, by);
+    var bn = el('g', { class: 'fx-branch' + (!isYes ? ' is-act' : '') }, g);
+    el('rect', { x: bx0, y: bnY, width: bw, height: 30, rx: 2, class: 'fx-branch-b' }, bn);
+    txt(noTxt, { x: bx0 + 12, y: bnY + 20, class: 'fx-t4' }, bn);
+    txt('判定依据：' + sc.vdWhy, { x: x + 16, y: y + 106, class: 'fx-dec-f' }, g);
+  }
+
   function animQuery(sc) {
     var n = nodeAnchor('R1', 'N2');
-    var c = L.ctrl, x1 = c.x + c.w / 2, y1 = c.y + 46 + 3 * 110 + 46;
+    var c = L.ctrl, x1 = c.x + c.w / 2, y1 = c.y + 42 + 4 * 84 + 35;
     var q = [{ x: n.x, y: n.y }, { x: n.x, y: n.y - 42 }, { x: x1, y: n.y - 42 }, { x: x1, y: y1 }];
     var t1 = token('ctl', { x: q[0].x, y: q[0].y }, { size: 8, label: 'QUERY' });
     move(t1, q, {
@@ -624,7 +687,71 @@ window.FLOW_SCENE = (function () {
       }
     });
     later(function () { card('dir', false, sc.ver || 'V1'); }, 3200);
-    callout(n.x - 56, n.y + 62, '逻辑 ID → 物理位置', '返回 ' + sc.dst, '#91e4ff');
+    later(function () { drawCandidates(sc); }, 600);
+    callout(n.x - 56, n.y + 62, '候选评估 · NV Directory + Cost Evaluator', '算收益，不是有硬件就选', '#91e4ff');
+  }
+
+  /* ── 候选评估链路：选中 = 主色实线；被放弃 = 灰虚线 + 叉（可开关） ── */
+  function drawCandidates(sc) {
+    if (!showCand || !sc.cands) return;
+    var g = el('g', { class: 'fx-candset' }, root.tags);
+    var pp = sc.prod.split('-');
+    var from = nodeAnchor(pp[0], pp[1]);
+    var rtF = rackTop(rackIdxOf(pp[0]));
+    var corridor = L.fabric.y + L.fabric.h + 10;
+    sc.cands.forEach(function (cd, i) {
+      later(function () {
+        var pts, mid, col;
+        if (cd.to === 'POOL') {
+          var pool = poolAnchor();
+          pts = [{ x: from.x, y: from.y }, { x: rtF.x, y: rtF.y }, { x: rtF.x, y: corridor },
+                 { x: pool.x + 150, y: corridor }, { x: pool.x + 150, y: pool.y - 8 }];
+          mid = pointAt(pts, polyLen(pts) * .5);
+          col = cd.ok ? '#f0785a' : null;
+        } else if (/^R\d-X$/.test(cd.to)) {
+          /* 抽象"远端 MHD"候选：指向目标机架顶部 */
+          var ri = rackIdxOf(cd.to.slice(0, 2));
+          var rt = rackTop(ri);
+          pts = [{ x: from.x, y: from.y }, { x: rtF.x, y: rtF.y }, { x: rtF.x, y: corridor },
+                 { x: rt.x, y: corridor }, { x: rt.x, y: rt.y }];
+          mid = pointAt(pts, polyLen(pts) * .55);
+          col = null;
+        } else {
+          var parts = cd.to.split('-');
+          var ri2 = rackIdxOf(parts[0]), mid2 = parts[1];
+          var sameRack = parts[0] === pp[0];
+          if (sameRack) {
+            var m = mhdAnchor(parts[0], mid2), bx = busXOf(ri2);
+            pts = [{ x: from.x + 40, y: from.y }, { x: bx, y: from.y }, { x: bx, y: m.y }, { x: m.x + 26, y: m.y }];
+            mid = pointAt(pts, polyLen(pts) * .45);
+          } else {
+            var rt2 = rackTop(ri2);
+            pts = [{ x: from.x, y: from.y }, { x: rtF.x, y: rtF.y }, { x: rtF.x, y: corridor },
+                   { x: rt2.x, y: corridor }, { x: rt2.x, y: rt2.y }];
+            mid = pointAt(pts, polyLen(pts) * .55);
+          }
+          col = cd.ok ? '#53e3c4' : null;
+        }
+        el('path', { d: pth(pts), class: cd.ok ? 'fx-cand-acc' : 'fx-cand-rej',
+          stroke: col || undefined }, g);
+        if (cd.ok) {
+          txt('✓ ' + cd.t + ' · 选中',
+            { x: mid.x + 12, y: mid.y < 140 ? mid.y + 16 : mid.y - 10, class: 'fx-cand-lb fx-cand-lb--ok' }, g);
+        } else {
+          el('path', { d: 'M' + (mid.x - 6) + ',' + (mid.y - 6) + ' L' + (mid.x + 6) + ',' + (mid.y + 6) +
+            ' M' + (mid.x - 6) + ',' + (mid.y + 6) + ' L' + (mid.x + 6) + ',' + (mid.y - 6), class: 'fx-cand-x' }, g);
+          /* 短标签 + 按序错高，避免走廊区互相叠压；完整原因见右侧面板与 hover */
+          var rjy = mid.y < 140 ? mid.y + 16 + (i % 2) * 14 : mid.y - 10;
+          if (mid.x > W - 240) {
+            txt('✕ ' + cd.t + ' · 放弃',
+              { x: mid.x - 12, y: rjy, class: 'fx-cand-lb', 'text-anchor': 'end' }, g);
+          } else {
+            txt('✕ ' + cd.t + ' · 放弃',
+              { x: mid.x + 12, y: rjy, class: 'fx-cand-lb' }, g);
+          }
+        }
+      }, 250 + i * 700);
+    });
   }
 
   function animAccess(sc) {
@@ -645,58 +772,98 @@ window.FLOW_SCENE = (function () {
       move(t0, pts0, {
         dur: 2200, onDone: function () {
           callout(pool0.x + 90, pool0.y - 40, 'RDMA 命中 · ' + sc.delay,
-            '存量路径 · 本情景的最优选择', '#5f9fe8');
+            '存量路径 · 本情景的最优选择', '#f0785a');
         }
       });
       return;
     }
 
-    /* 部署型场景：本地 CXL 命中 + 跨机架 RDMA 对照 */
     var m = mhdAnchor('R1', 'MHD-1'), n = nodeAnchor('R1', 'N2');
     var bx = busXOf(0);
-    var localPts = [{ x: m.x + 26, y: m.y }, { x: bx, y: m.y }, { x: bx, y: n.y }, { x: n.x, y: n.y }];
-    pulseLink('lnk-cxl-R1-MHD-1', 'is-flow', 3000);
-    pulseLink('lnk-cxl-R1-N2', 'is-flow', 3000);
-    var t1 = token('cxl', { x: localPts[0].x, y: localPts[0].y }, { size: 10, label: 'CXL' });
-    move(t1, localPts, {
-      dur: 1000, onDone: function () { hl('.node[data-pick="R1-N2"] .fx-hbm', 'is-hit', 2600); }
-    });
 
     if (sc.id === 'S2') {
-      /* 公共上下文：R3 同时从本机架 MHD 副本命中 */
-      var m3 = mhdAnchor('R3', 'MHD-3'), n3 = nodeAnchor('R3', 'N2');
-      var bx3 = busXOf(2);
+      /* 公共上下文（王牌情景）：两段式 ——
+         第一步：一次性跨机架复制分发（浅蓝虚线，前置开销）
+         第二步：海量并发读全部走机架内 CXL（后续收益） */
+      var pool = poolAnchor();
+      [['R1', 'MHD-1', 0, 300], ['R3', 'MHD-3', 2, 1000]].forEach(function (cfg) {
+        var rid = cfg[0], mid = cfg[1], ri = cfg[2], dl = cfg[3];
+        var m2 = mhdAnchor(rid, mid), bx2 = busXOf(ri);
+        var pts = [{ x: pool.x + 150, y: pool.y - 16 }, { x: rackX(ri) + L.rack.w / 2, y: pool.y - 16 },
+                   { x: bx2, y: m2.y }, { x: m2.x + 26, y: m2.y }];
+        later(function () {
+          var cp = el('path', { d: pth(pts), class: 'fx-copy-path' }, root.toks);
+          later(function () { if (cp.parentNode) cp.parentNode.removeChild(cp); }, 3600);
+          var t = token('copy', { x: pts[0].x, y: pts[0].y }, { size: 11, label: 'COPY ×1' });
+          move(t, pts, {
+            dur: 1600, keep: true, onDone: function () {
+              hl('.mhd[data-pick="' + rid + '-' + mid + '"] .fx-mhd', 'is-hot', 3400);
+            }
+          });
+        }, dl);
+      });
       later(function () {
-        pulseLink('lnk-cxl-R3-MHD-3', 'is-flow', 3000);
-        pulseLink('lnk-cxl-R3-N2', 'is-flow', 3000);
-        var pts3 = [{ x: m3.x + 26, y: m3.y }, { x: bx3, y: m3.y }, { x: bx3, y: n3.y }, { x: n3.x, y: n3.y }];
-        var t3 = token('cxl', { x: pts3[0].x, y: pts3[0].y }, { size: 10, label: 'CXL' });
-        move(t3, pts3, {
-          dur: 1000, onDone: function () {
-            hl('.node[data-pick="R3-N2"] .fx-hbm', 'is-hit', 2600);
-            callout(rackX(2) - 6, L.rack.y + 66, 'R3 本地副本命中', '同一份上下文 · 不再占用 Spine', '#53e3c4');
-          }
+        callout(L.pool.x + 90, L.pool.y - 40, '第一步 · 一次复制分发完成', '前置开销 → 之后所有读走机架内 CXL', '#8fc6f2');
+      }, 2100);
+      later(function () {
+        [['R1', 'MHD-1'], ['R3', 'MHD-3']].forEach(function (cfg) {
+          var rid = cfg[0], mid = cfg[1], ri = rackIdxOf(rid), bx2 = busXOf(ri);
+          var m2 = mhdAnchor(rid, mid);
+          ['N1', 'N2'].forEach(function (nid, k) {
+            var n2 = nodeAnchor(rid, nid);
+            later(function () {
+              pulseLink('lnk-cxl-' + rid + '-' + mid, 'is-flow', 2000);
+              pulseLink('lnk-cxl-' + rid + '-' + nid, 'is-flow', 2000);
+              var pts = [{ x: m2.x + 26, y: m2.y }, { x: bx2, y: m2.y }, { x: bx2, y: n2.y }, { x: n2.x, y: n2.y }];
+              var t = token('cxl', { x: pts[0].x, y: pts[0].y }, { size: 9 });
+              move(t, pts, { dur: 900, onDone: function () {
+                hl('.node[data-pick="' + rid + '-' + nid + '"] .fx-hbm', 'is-hit', 1600);
+              } });
+            }, k * 280);
+          });
         });
-      }, 700);
+        callout(rackX(0) - 6, L.rack.y - 26, '第二步 · 海量并发读 · 全部机架内命中',
+          'R1/R3 各自读本机副本 · 不再占用 Spine', '#53e3c4');
+      }, 2900);
+      return;
     }
 
-    var src = rackTop(1), dstTop = rackTop(0);
+    /* S1 部署型：R1 本地多路并发读（兑现机架内 CXL 原生低延迟） */
+    [['N1', 0], ['N2', 260], ['N1', 520], ['N2', 780]].forEach(function (cfg) {
+      var nid = cfg[0], dl = cfg[1];
+      later(function () {
+        var n2 = nodeAnchor('R1', nid);
+        pulseLink('lnk-cxl-R1-MHD-1', 'is-flow', 2200);
+        pulseLink('lnk-cxl-R1-' + nid, 'is-flow', 2200);
+        var pts = [{ x: m.x + 26, y: m.y }, { x: bx, y: m.y }, { x: bx, y: n2.y }, { x: n2.x, y: n2.y }];
+        var t1 = token('cxl', { x: pts[0].x, y: pts[0].y }, { size: 10, label: dl === 0 ? 'CXL' : null });
+        move(t1, pts, { dur: 950, onDone: function () {
+          hl('.node[data-pick="R1-' + nid + '"] .fx-hbm', 'is-hit', 1800);
+        } });
+      }, dl);
+    });
+    later(function () {
+      callout(rackX(0) - 6, L.rack.y - 26, '本地命中 · ' + sc.delay,
+        '大量读请求全部走机架内 CXL · 核心收益', '#53e3c4');
+    }, 400);
+
+    /* 对照：未部署 CXL 的 R2 仍须跨机架 RDMA（橙红） */
+    var src = rackTop(1);
     var rd = [
       { x: src.x, y: src.y },
       { x: src.x, y: L.fabric.y + L.fabric.h + 8 },
-      { x: dstTop.x, y: L.fabric.y + L.fabric.h + 8 },
-      { x: dstTop.x, y: dstTop.y + 8 },
-      { x: bx, y: dstTop.y + 8 },
+      { x: rackX(0) + L.rack.w / 2, y: L.fabric.y + L.fabric.h + 8 },
+      { x: rackX(0) + L.rack.w / 2, y: rackTop(0).y },
+      { x: bx, y: rackTop(0).y },
       { x: bx, y: m.y },
       { x: m.x + 26, y: m.y }
     ];
-    pulseLink('lnk-rdma-1', 'is-flow', 3000);
     pulseLink('lnk-rdma-2', 'is-flow', 3000);
     later(function () {
       var t2 = token('rdma', { x: rd[0].x, y: rd[0].y }, { size: 10, label: 'RDMA' });
       move(t2, rd, { dur: 2200 });
-    }, 500);
-    callout(rackX(1) - 10, L.rack.y + 66, '跨机架访问', 'ToR → Spine → ToR · ' + sc.delay, '#5f9fe8');
+    }, 1200);
+    callout(rackX(1) - 10, L.rack.y - 26, '对照 · R2 仍走 RDMA', 'ToR → Spine → ToR · 4.1 µs', '#f0785a');
   }
 
   function animMigrate(sc) {
@@ -720,7 +887,12 @@ window.FLOW_SCENE = (function () {
         var rid = cfg[0], mid = cfg[1], dl = cfg[2], ri = cfg[3];
         var m = mhdAnchor(rid, mid);
         var bx = busXOf(ri);
-        pulseLink('lnk-rdma-' + (ri + 1), 'is-flow', 2600);
+        /* 一次性复制分发流：浅蓝虚线（前置开销） */
+        var flowPts = [{ x: pool.x + 150, y: pool.y - 20 }, { x: rackX(ri) + L.rack.w / 2, y: pool.y - 20 }];
+        later(function () {
+          var cp = el('path', { d: pth(flowPts), class: 'fx-copy-path' }, root.toks);
+          later(function () { if (cp.parentNode) cp.parentNode.removeChild(cp); }, 3000);
+        }, dl);
         later(function () {
           pulseLink('lnk-cxl-' + rid + '-' + mid, 'is-flow', 2200);
           var pts = [{ x: pool.x + 150, y: pool.y - 20 }, { x: rackX(ri) + L.rack.w / 2, y: pool.y - 20 },
@@ -789,8 +961,8 @@ window.FLOW_SCENE = (function () {
   }
 
   var ANIMS = {
-    gen: animGen, collect: animCollect, decide: animDecide, query: animQuery,
-    access: animAccess, migrate: animMigrate, evict: animEvict
+    gen: animGen, collect: animCollect, decide: animDecide, locality: animLocality,
+    query: animQuery, access: animAccess, migrate: animMigrate, evict: animEvict
   };
 
   function play(stage, sc) {
@@ -842,6 +1014,7 @@ window.FLOW_SCENE = (function () {
     mount: mount, play: play, clear: clear, select: select,
     rackIdxOf: rackIdxOf, nodeAnchor: nodeAnchor, mhdAnchor: mhdAnchor,
     setDeployLevel: setDeployLevel, deployLevel: deployLevel,
-    setAutoDeploy: function (on) { autoDeploy = !!on; }
+    setAutoDeploy: function (on) { autoDeploy = !!on; },
+    setShowCand: function (on) { showCand = !!on; }
   };
 })();

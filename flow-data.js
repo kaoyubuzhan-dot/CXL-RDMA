@@ -1,9 +1,9 @@
 /* ============================================================
  * flow-data.js — 「运行流程 / LIVE RUN」数据层
  *
- * 七阶段生命周期（对应 LLM 推理产生 KV 的全过程）：
- *   01 推理生成 02 信息采集 03 存储决策 04 位置查询
- *   05 数据访问 06 迁移复制 07 淘汰回收
+ * 八阶段生命周期（对应 LLM 推理产生 KV 的全过程）：
+ *   01 推理生成 02 信息采集 03 存储决策 04 局部性判定（核心分叉）
+ *   05 位置查询 06 数据访问 07 迁移复制 08 淘汰回收
  *
  * 每个阶段描述四件事（参考需求文档「发生了什么」）：
  *   act 动作 · obj 对象 · why 原因 · res 结果
@@ -49,6 +49,14 @@ window.FLOW = (function () {
       kv: 'KV-001', prod: 'R1-N1', hot: 82, local: 70, dst: 'R1 / MHD-1', tier: 'CXL MHD',
       peer: 'R2-N1', peerLoc: 30, replica: '—', ver: 'V1', delay: '0.9 µs', load: '48%', occ: '63%',
       r1score: 86, r3score: 64, r3cong: 86,
+      verdict: '是 · 主力 R1', vdWhy: '请求分布 70% 落在 R1 · 热度周期长期稳定 · 访问机架集合 {R1}',
+      mx: { rica: '0.9 µs', naive: '2.7 µs', gain: '-67%', cap: '12%', xr: '0.3 GB/s',
+        basis: '主力机架明确且具备 CXL 底座 → 本地放置收益最大；朴素策略若强行分发多副本只会白占容量（示意，非实测）' },
+      cands: [
+        { id: 'A', t: '本地 CXL', to: 'R1-MHD-1', ok: true, why: '主力机架 · 本地命中' },
+        { id: 'C', t: '远端 MHD', to: 'R3', ok: false, why: '跨机架叠加 · 收益衰减' },
+        { id: 'D', t: 'RDMA Pool', to: 'POOL', ok: false, why: '延迟高于本地 CXL' }
+      ],
       deploy: ['R1', 'R3'],
       decision: {
         note: '综合评分 = 局部性 · 历史热度 · 拥塞收益 · 利用率 · 部署成本 加权（示意，非实测）',
@@ -66,6 +74,14 @@ window.FLOW = (function () {
       kv: 'KV-002', prod: 'R2-N1', hot: 91, local: 45, dst: 'R1-MHD-1 + R3-MHD-3（副本）', tier: 'CXL MHD 副本',
       peer: 'R3-N2', peerLoc: 38, replica: 'R1-MHD-1 · R3-MHD-3', ver: 'V2', delay: '1.1 µs', load: '91%', occ: '84%',
       r1score: 84, r3score: 78, r3cong: 91,
+      verdict: '是 · 多机架突发共享', vdWhy: '请求分布散落 R1/R2/R3 · 突发窗口内热度 88+ · 访问机架集合 {R1,R2,R3}',
+      mx: { rica: '1.1 µs', naive: '4.3 µs', gain: '-74%', cap: '18%', xr: '一次性 32 GB',
+        basis: '多机架同时读 → 一次复制分发副本，后续海量读全部走机架内 CXL；朴素策略让各机架反复远程拉取，压垮 Spine（示意，非实测）' },
+      cands: [
+        { id: 'A', t: '副本 → R1 CXL', to: 'R1-MHD-1', ok: true, why: 'R1 突发请求方 · 副本落地' },
+        { id: 'B', t: '副本 → R3 CXL', to: 'R3-MHD-3', ok: true, why: 'R3 同为请求方 · 副本落地' },
+        { id: 'C', t: '反复远端拉取', to: 'R1-X', ok: false, why: '跨机架读风暴 · 压垮 Spine' }
+      ],
       deploy: ['R1', 'R3'],
       decision: {
         note: '突发长上下文被多机架同时请求 · 拥塞驱动（示意，非实测）',
@@ -80,6 +96,9 @@ window.FLOW = (function () {
             why: '与该 KV 无明显交集，维持存量架构' }
         ] },
       ov: {
+        locality: {
+          caption: '突发窗口内 R1/R2/R3 同时高频请求 → 判定：是 · 多机架突发共享',
+          res: '分流结果：多机架共享 → 复制分发策略（一次拷贝、多机架本地读），而非单点本地放置' },
         gen: { res: '突发：同一份长上下文前缀在短时间内被 R1/R2/R3 同时高频请求（示意）' },
         decide: {
           caption: '突发共享 → 全局证据一次采齐，R1+R3 同批部署，副本就近放入各机架 MHD',
@@ -96,6 +115,14 @@ window.FLOW = (function () {
     { id: 'S3', zh: '生产 = 访问机架', en: 'PROD-EQ-ACC', brief: '均在 RDMA-only 机架 → 不部署远端 CXL',
       kv: 'KV-003', prod: 'R2-N1', hot: 78, local: 85, dst: 'RDMA Pool-A', tier: 'RDMA 内存池',
       peer: 'R2-N3', peerLoc: 85, replica: '—', ver: 'V3', delay: '4.1 µs', load: '33%', occ: '24%',
+      verdict: '是 · 主力 R2（RDMA-only）', vdWhy: '请求分布 85% 集中 R2 · 热度 78 · 但主力机架无 CXL 硬件',
+      mx: { rica: '4.1 µs', naive: '5.6 µs', gain: '-27%', cap: '0%', xr: '1.1 GB/s',
+        basis: '远端 MHD = 跨机架转发 + 远端读取叠加，比原生 RDMA 更慢 → 主动放弃远端 CXL（示意，非实测）' },
+      cands: [
+        { id: 'D', t: 'RDMA Pool', to: 'POOL', ok: true, why: '生产=访问重合 · 原生路径最优' },
+        { id: 'C', t: '远端 R1 MHD', to: 'R1-X', ok: false, why: '跨机架转发 + 读取叠加更慢' },
+        { id: 'B', t: '复制到 CXL', to: 'R3', ok: false, why: '访问不离开 R2 · 无收益' }
+      ],
       deploy: [],
       decision: {
         note: '生产与访问重合在同一 RDMA-only 机架（示意，非实测）',
@@ -110,6 +137,9 @@ window.FLOW = (function () {
             why: '无访问、成本中等，维持存量架构' }
         ] },
       ov: {
+        locality: {
+          caption: '请求 85% 集中在 R2，但 R2 是 RDMA-only 机架 → 判定：是 · 主力无 CXL 底座',
+          res: '分流结果：主力明确但无 CXL 硬件 → 远端 CXL 无收益，走原生 RDMA 路径' },
         gen: { res: '生产与访问都在 R2（RDMA-only 机架）—— 数据没有离开集群远端池的理由' },
         decide: {
           caption: '决策矩阵：访问高度集中但生产=访问重合 → 判定不部署远端 CXL',
@@ -133,6 +163,14 @@ window.FLOW = (function () {
     { id: 'S4', zh: '多机架均匀', en: 'UNIFORM', brief: '无明显主力机架 → 保留 RDMA 存储',
       kv: 'KV-004', prod: 'R3-N2', hot: 52, local: 24, dst: 'RDMA Pool-A', tier: 'RDMA 内存池',
       peer: 'R1-N3', peerLoc: 22, replica: '—', ver: 'V4', delay: '4.1 µs', load: '33%', occ: '24%',
+      verdict: '否 · 无主力机架', vdWhy: '请求分布均匀（各 ≤26%）· 无集中热点 · 访问机架集合 = 全部机架',
+      mx: { rica: '4.1 µs', naive: '4.4 µs', gain: '-7%', cap: '0%', xr: '2.0 GB/s',
+        basis: '均匀访问下复制收益≈0、容量浪费 → 保留 RDMA，稀缺 CXL 预算留给高价值 KV（示意，非实测）' },
+      cands: [
+        { id: 'D', t: 'RDMA Pool', to: 'POOL', ok: true, why: '全网共享 · 单一份' },
+        { id: 'B', t: '复制副本', to: 'R1', ok: false, why: '收益≈0 · 容量浪费' },
+        { id: 'C', t: '远端 CXL', to: 'R3-X', ok: false, why: '无主力机架 · 不就近' }
+      ],
       deploy: [],
       decision: {
         note: '访问均匀散布 · 无明显主力访问机架（示意，非实测）',
@@ -147,6 +185,9 @@ window.FLOW = (function () {
             why: '维持存量架构，观察访问形态是否收敛后再评估' }
         ] },
       ov: {
+        locality: {
+          caption: '四机架访问各 ≤ 26%，无任何收敛点 → 判定：否 · 无主力访问机架',
+          res: '分流结果：无主力 → 任何放置都不"就近"，保留 RDMA 全网共享' },
         gen: { res: '访问主体均匀散布在四个机架（各 ≤ 26%）—— 无明显主力访问机架' },
         decide: {
           caption: '决策矩阵：四机架评分 34/30/28/22 全部低于阈值 → 保留 RDMA 存储',
@@ -202,7 +243,17 @@ window.FLOW = (function () {
       anim: { type: 'decide' }
     },
     {
-      id: 'query', n: '04', zh: '位置查询', en: 'DIRECTORY',
+      id: 'locality', n: '04', zh: '局部性判定', en: 'LOCALITY JUDGE',
+      caption: '核心分叉点：这批 KV 有没有明确的主力访问机架？→ 判定：{verdict}',
+      act: 'Locality Judge 综合请求分布、热度周期与访问机架集合，回答核心问题：是否存在明确的主力访问机架',
+      obj: '{kv} · 请求分布 · 热度周期 · 访问机架集合 → 判定：{verdict}',
+      why: '{vdWhy}',
+      res: '所有放置策略从这个判定点开始分流：有主力且具备 CXL 底座 → 匹配 CXL 放置策略；否则 → 保留 RDMA',
+      metrics: { 延迟: '—', 链路: '{load}', 占用: '{occ}' },
+      anim: { type: 'locality' }
+    },
+    {
+      id: 'query', n: '05', zh: '位置查询', en: 'DIRECTORY',
       caption: 'Decode 节点发出 {kv} 查询 → KV Directory 返回 {dst}',
       act: '请求节点只持有逻辑 ID，向 KV Directory 发起查询；Directory 检索映射记录并返回物理位置、状态与版本',
       obj: '{kv} · KV Directory · 逻辑地址 / 物理地址分离',
@@ -212,7 +263,7 @@ window.FLOW = (function () {
       anim: { type: 'query' }
     },
     {
-      id: 'access', n: '05', zh: '数据访问', en: 'DATA ACCESS',
+      id: 'access', n: '06', zh: '数据访问', en: 'DATA ACCESS',
       caption: '增量部署收益可见：本地 CXL 命中 0.9 µs，对比 T0 基线 RDMA 4.1 µs',
       act: '本地：同机架节点经 CXL 从 {dst} 读取 KV；远端：另一机架仍必须走 Leaf-Spine 跨机架 RDMA',
       obj: '{kv} · CXL 链路（T1 新增） · RDMA 链路（存量）',
@@ -222,7 +273,7 @@ window.FLOW = (function () {
       anim: { type: 'access' }
     },
     {
-      id: 'migrate', n: '06', zh: '迁移复制', en: 'MIGRATE / COPY',
+      id: 'migrate', n: '07', zh: '迁移复制', en: 'MIGRATE / COPY',
       caption: 'T2：硬件已就位，数据开始重分配——热点 KV 迁入本地 MHD、共享 KV 生成副本',
       act: 'A. 迁移：{kv} 从旧位置搬向 {dst}；B. 复制：多机架共享的高频 KV 在对端生成副本',
       obj: '{kv}（原件）· 新副本 · Directory 版本 · T1 新上线的 R1/R3 MHD',
@@ -232,7 +283,7 @@ window.FLOW = (function () {
       anim: { type: 'migrate' }
     },
     {
-      id: 'evict', n: '07', zh: '淘汰回收', en: 'EVICTION',
+      id: 'evict', n: '08', zh: '淘汰回收', en: 'EVICTION',
       caption: '热度持续下降 → KV 转冷，按策略下沉至 RDMA Pool 或淘汰',
       act: 'Controller 周期复核热度与本地访问比例，判定 {kv} 已转冷；按策略迁移至 RDMA 池或直接淘汰',
       obj: '{kv} · 淘汰队列 · Directory 失效标记',
@@ -248,23 +299,25 @@ window.FLOW = (function () {
    * 证据在阶段 02 一次采齐，阶段 03 一次决策、同批执行——
    * 不存在"等 R3 的需求再出现才部署"的时间差。
    * START_LEVEL[i] = 第 i 个生命周期阶段开始时的部署等级（0-1），
-   * T1 在阶段 03 内动画触发；T2 为数据行为，随阶段 06 动画呈现。 */
+   * T1 在阶段 03 内动画触发；T2 为数据行为，随阶段 07 动画呈现。 */
   var DEP = [
     { id: 'T0', zh: '全 RDMA 基线', brief: '0 / 4 CXL 机架 · 仅存量 RDMA + 远端内存池' },
     { id: 'T1', zh: 'R1+R3 同批部署', brief: '2 / 4 · 全局证据一次采齐、一次决策，两机架并行上线' },
     { id: 'T2', zh: 'KV 重分配', brief: '热点迁入 MHD · 共享 KV 生成副本 · 利用率 63%' }
   ];
-  var START_LEVEL = [0, 0, 0, 1, 1, 1, 1];
+  var START_LEVEL = [0, 0, 0, 1, 1, 1, 1, 1];
 
   /* ── 全局部署决策矩阵：已并入各场景的 decision 字段（随情景变化）── */
 
-  /* ── 图例（与需求文档统一视觉编码一致） ── */
+  /* ── 图例（全局视觉语义规范：源 KV / 副本 / CXL 通路 / 复制分发流 / RDMA / 否决候选 / 信令） ── */
   var LEGEND = [
-    { k: 'kv',   c: '#e6a056', t: 'KV Block（橙色方块）' },
-    { k: 'rep',  c: '#a38bf2', t: 'KV 副本（紫色方块）' },
-    { k: 'cxl',  c: '#53e3c4', t: 'CXL 数据通路（青绿）' },
-    { k: 'rdma', c: '#5f9fe8', t: 'RDMA 数据通路（蓝）' },
-    { k: 'ctl',  c: '#e4b66b', t: '控制与遥测（黄虚线）' }
+    { k: 'kv',   c: '#e6a056', t: 'KV Block（橙）· 金色 = 本轮跟踪 KV' },
+    { k: 'rep',  c: '#a38bf2', t: 'KV 副本（紫）' },
+    { k: 'copy', c: '#8fc6f2', t: '复制分发流（浅蓝虚线 · 一次性准备）' },
+    { k: 'cxl',  c: '#53e3c4', t: '机架内 CXL 访问流（青绿粗实线）' },
+    { k: 'rdma', c: '#f0785a', t: 'RDMA 访问流（橙红粗实线）' },
+    { k: 'cand', c: '#8ca0af', t: '候选否决链路（灰虚线 + 叉）' },
+    { k: 'ctl',  c: '#e4b66b', t: '控制面信令（黄细虚线）' }
   ];
 
   function pick(id) {
