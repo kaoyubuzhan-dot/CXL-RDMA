@@ -16,6 +16,8 @@
   APP.render = function () {
     // 页面类名（用于布局差异，如 traffic 页分析面板分栏）
     $('#app').setAttribute('data-page', STATE.page);
+    if (STATE.page !== 'rack') syncRack3d();
+    $('#app').setAttribute('data-v3d', STATE.view3d ? '1' : '0');
     // 页面 tab
     $$('.page-tab').forEach(b => b.classList.toggle('is-active', b.getAttribute('data-page') === STATE.page));
     $$('[data-i18n]').forEach(el => el.textContent = t(el.getAttribute('data-i18n')));
@@ -218,6 +220,7 @@
   // ---------- 页面切换 ----------
   APP.switchPage = function (page) {
     STATE.page = page;
+    if (page === 'overview' && STATE.view3d === undefined) STATE.view3d = true;
     if (page !== 'overview') hideHeavy3d();
     // 进入 KV 页或 Traffic 页且未选中 KV 时，默认选中当前场景焦点 KV（或 KV-003），
     // 以便右侧立即展示画像、Traffic 页立即显示访问路径——这是本模拟器的核心展示点

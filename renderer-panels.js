@@ -135,7 +135,7 @@
         <div><span>运行代价</span><b class="rdma">${m.opCost} 万元</b><small>跨机架 KV 流量 × ${D.PERF_MODEL.opCostPerGB} 万元/GB</small></div>
         <div><span>目标值 J = C + α·O</span><b class="cxl">${m.objective}</b><small>α = ${m.alpha}（成本与运行代价的权衡）</small></div>
       </div>
-      <div class="cfg-hint">模型估算：<b>加机架 / 加设备 / 扩容量 / 多接主机 → 时延与跨机架流量下降、成本与利用率上升</b>。数值为教学示意，非实测。</div>
+      <div class="cfg-hint">模型估算：<b>当前为旧版简化估算，尚未计入请求排队与迁移竞争；不能用于证明增量部署优势</b>。数值为教学示意，非实测。</div>
     </div>`;
   }
 
@@ -152,10 +152,10 @@
     return `<div class="cfg-section-title">⑤ 硬件库 / 拖拽部署</div>
       <div class="hwlib" id="hwlib">
         <div class="hwlib-item" draggable="true" data-drag-hw="GPU_SERVER">
-          <span class="hwlib-ico gpu">▦</span><span class="hwlib-txt"><b>GPU Server</b><small>GPU 服务器 · 2U · 计算节点</small></span>
+          <span class="hwlib-ico gpu">▦</span><span class="hwlib-txt"><b>GPU Server</b><small>GPU 服务器 · 4U 示意 · 计算节点</small></span>
         </div>
         <div class="hwlib-item" draggable="true" data-drag-hw="CXL_SUBSYSTEM">
-          <span class="hwlib-ico cxl">◈</span><span class="hwlib-txt"><b>CXL Switch + MHD</b><small>CXL 交换机 + 共享内存 · 2U</small></span>
+          <span class="hwlib-ico cxl">◈</span><span class="hwlib-txt"><b>CXL MHD</b><small>多主机直连共享内存 · 2U 示意</small></span>
         </div>
         <div class="hwlib-item" draggable="true" data-drag-hw="RDMA_TOR">
           <span class="hwlib-ico rdma">▤</span><span class="hwlib-txt"><b>RDMA ToR</b><small>机架接入交换机 · Leaf</small></span>
@@ -167,7 +167,7 @@
         <button type="button" class="hwlib-btn ghost" id="remove-hw">－移除</button>
       </div>
       <div class="cfg-panel" style="margin-top:10px">
-        <div class="cfg-row"><span>CXL Switch Host Port</span><b>${sw.hostPorts} 口</b></div>
+        <div class="cfg-row"><span>主机接入上限</span><b>${sw.hostPorts} 口</b></div>
         <input class="mini-range" type="range" min="1" max="6" step="1" value="${sw.hostPorts}" data-swports="${rid}" aria-label="Host Port 数"/>
         <div class="cfg-hint">Host Port 决定可接主机数（当前机架 ${S.usedHostPorts(rid)} 台已接）；与 MHD 容量相互独立。</div>
       </div>`;
@@ -359,7 +359,7 @@
         }).join('')}
       </div>`:''}
       ${portDossier(rid)}
-      <div class="note-box">设备/U位/端口为<b>逻辑示意</b>。机架内多台 MHD 经 CXL Switch 汇聚为<b>一个共享内存池</b>，非各自独占。</div>`;
+      <div class="note-box">设备/U位/端口为<b>逻辑示意</b>。本轮三维视图采用<b>主机直连 MHD</b>。每台设备的 Host 接口分别约束连接数量；不要求额外 CXL Switch。</div>`;
   }
 
   // 右侧端口档案：Host Port 占用 + 物理连接清单 + 可访问主机
@@ -373,13 +373,13 @@
     let hostRows = '';
     for (let i=1; i<=sw.hostPorts; i++) {
       const occ = links.find(l=>l.hostPort==='H'+i);
-      hostRows += `<div class="metric-line"><span>Host Port H${i}</span><b style="font-size:10px;color:${occ?C.cxl:'var(--deep)'}">${occ?occ.node+' · 已占用':'空闲'}</b></div>`;
+      hostRows += `<div class="metric-line"><span>主机接入槽 ${i}</span><b style="font-size:10px;color:${occ?C.cxl:'var(--deep)'}">${occ?occ.node+' · 已占用':'空闲'}</b></div>`;
     }
     let linkRows = links.length ? links.map(l=>
-      `<div class="metric-line"><span>${l.node}</span><b style="font-size:9px;color:${C.cxl}">${l.hostPort}→M1→${l.mhdId}</b></div>`).join('')
+      `<div class="metric-line"><span>${l.node}</span><b style="font-size:9px;color:${C.cxl}">直连 ${l.mhdId}</b></div>`).join('')
       : `<div class="metric-line"><span>物理连接</span><b style="font-size:10px;color:var(--deep)">未建立</b></div>`;
     return `<div class="detail-section"><h4>端口映射 PORT MAPPING</h4>
-      <div class="metric-line"><span>CXL Switch Host Port</span><b class="cxl">${usedHost} / ${sw.hostPorts}</b></div>
+      <div class="metric-line"><span>主机接入上限</span><b class="cxl">${usedHost} / ${sw.hostPorts}</b></div>
       ${hostRows}
       <div style="height:6px"></div>
       <h4>物理连接 CXL LINKS</h4>${linkRows}
