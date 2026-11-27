@@ -10,3 +10,6 @@ Desktop.ini
 
 # ── 依赖（本项目零构建，vendor 已内置，防止误提交）──
 node_modules/
+
+# ── 设计稿截图（不入库） ──
+成果_*.png

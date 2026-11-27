@@ -34,6 +34,11 @@
     // 场景状态栏
     updateStageHeader();
     updateScenarioLabel();
+    // 从其它页切回总览时，若三维仍开启则重新挂载重型场景
+    if (STATE.page === 'overview' && STATE.view3d) {
+      const hh = ensureHeavy3d();
+      if (hh) window.HEAVY_CLUSTER.resize();
+    }
     // 各区域
     if (STATE.page === 'lc' && window.__RENDER_LC__) {
       window.__RENDER_LC__.renderAll();
@@ -140,6 +145,34 @@
     const ids = RACKS.filter(r => STATE.deployment[r.id]).map(r => r.id);
     window.__GLCLUSTER__.setDeploy(ids, animate !== false);
   }
+  /* 02 集群总览 · 重型三维场景（heavy-cluster.js） */
+  function ensureHeavy3d() {
+    if (!window.HEAVY_CLUSTER || !window.HEAVY_CLUSTER.available) {
+      toast('WebGL 不可用 · 回落 2D 视图');
+      return null;
+    }
+    let host = document.getElementById('heavy');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'heavy';
+      $('#stage').insertBefore(host, $('#stage-hint'));
+    }
+    host.style.display = '';
+    window.HEAVY_CLUSTER.mount(host, {
+      onRack: id => {
+        STATE.selectedRack = id;
+        toast('选中 ' + id + ' · 打开机架解剖');
+        APP.switchPage('rack');
+      }
+    });
+    return host;
+  }
+  function hideHeavy3d() {
+    if (window.HEAVY_CLUSTER) { try { window.HEAVY_CLUSTER.unmount(); } catch (e) {} }
+    const h = document.getElementById('heavy');
+    if (h) h.style.display = 'none';
+  }
+
   APP.toggleOverview3d = function (force) {
     if (typeof force === 'boolean') STATE.view3d = force;
     else STATE.view3d = !STATE.view3d;
@@ -150,20 +183,19 @@
       btn.classList.toggle('is-active', !!STATE.view3d);
       btn.textContent = STATE.view3d ? '返回 2D' : '三维';
     }
-    if (!STATE.view3d) { log('集群总览 → 2D 平面拓扑', true); return; }
-    const host = ensureCluster3d();
+    if (!STATE.view3d) { hideHeavy3d(); log('集群总览 → 2D 平面拓扑', true); return; }
+    const host = ensureHeavy3d();
     if (!host) {
       app.setAttribute('data-v3d', '0'); STATE.view3d = false;
       if (btn) { btn.classList.remove('is-active'); btn.textContent = '三维'; }
       return;
     }
-    // 入场动画：淡入 + 轻微上移（CSS is-entering）
     host.classList.remove('is-entering');
     void host.offsetWidth;
     host.classList.add('is-entering');
     setTimeout(() => host.classList.remove('is-entering'), 950);
-    window.__GLCLUSTER__.resize();
-    log('集群总览 → WebGL 三维视图（与 2D 同步联动）', true);
+    window.HEAVY_CLUSTER.resize();
+    log('集群总览 → 重型三维视图', true);
   };
 
   function updateStageHeader() {
@@ -186,6 +218,7 @@
   // ---------- 页面切换 ----------
   APP.switchPage = function (page) {
     STATE.page = page;
+    if (page !== 'overview') hideHeavy3d();
     // 进入 KV 页或 Traffic 页且未选中 KV 时，默认选中当前场景焦点 KV（或 KV-003），
     // 以便右侧立即展示画像、Traffic 页立即显示访问路径——这是本模拟器的核心展示点
     if ((page === 'kv' || page === 'traffic') && !STATE.selectedKV) {
