@@ -662,14 +662,22 @@ button:focus-visible,input:focus-visible{outline:1px solid var(--accent);outline
 .app[data-page="lc"] .transport-block{display:none}          /* 用页内播放/时间轴 */
 .app[data-page="lc"] .stage-tools{display:none}
 
-#gllc{position:absolute;inset:0;z-index:3;display:none;background:radial-gradient(72% 78% at 50% 44%,#0a161f 0%,#050b10 60%,#03070a 100%);overflow:hidden}
+#gllc{position:absolute;inset:0;z-index:3;display:none;background:radial-gradient(78% 82% at 50% 46%,#071827 0%,#040d18 52%,#01060c 100%);overflow:hidden}
 #gllc canvas{display:block;width:100%;height:100%}
 .app[data-page="lc"] #gllc{display:block}
 .gll-labels{position:absolute;inset:0;z-index:4;pointer-events:none}
-.gll-lbl{position:absolute;transform:translate(-50%,-140%);font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;
-  color:#9fc3d2;background:rgba(5,11,17,.6);border:1px solid rgba(167,197,215,.16);padding:1px 7px;border-radius:1px;
-  text-shadow:0 2px 10px rgba(0,0,0,.9);transition:color .2s,border-color .2s}
-.gll-lbl.sel{color:#08161a;background:#53e3c4;border-color:#53e3c4}
+.gll-lbl{position:absolute;transform:translate(-50%,-140%);font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;
+  color:#8fd8ff;background:rgba(3,12,22,.72);border:1px solid rgba(0,229,255,.4);padding:2px 9px;border-radius:2px;
+  text-shadow:0 0 10px rgba(0,229,255,.7);box-shadow:0 0 14px -4px rgba(0,229,255,.5), inset 0 0 12px -8px rgba(0,229,255,.6);
+  transition:color .2s,border-color .2s,box-shadow .2s}
+.gll-lbl.cxl{color:#8bffd9;border-color:rgba(0,255,168,.45);text-shadow:0 0 10px rgba(0,255,168,.7);
+  box-shadow:0 0 14px -4px rgba(0,255,168,.5), inset 0 0 12px -8px rgba(0,255,168,.6)}
+.gll-lbl--sub{font-size:9px;letter-spacing:.08em;color:#7fa8bc;background:rgba(3,12,22,.55);
+  border-color:rgba(80,140,170,.28);padding:1px 6px;text-shadow:0 0 8px rgba(0,180,255,.4);
+  box-shadow:0 0 10px -4px rgba(0,180,255,.4)}
+.gll-lbl--sub.cxl{color:#7fe8c4;border-color:rgba(0,255,168,.32);text-shadow:0 0 8px rgba(0,255,168,.45)}
+.gll-lbl--sub.sel{color:#04121a;background:#00e5ff;border-color:#00e5ff}
+.gll-lbl.sel{color:#04121a;background:#00e5ff;border-color:#00e5ff;text-shadow:none;box-shadow:0 0 22px -2px rgba(0,229,255,.9)}
 
 /* 顶部：阶段导航 + 镜头 */
 #lc-top{position:absolute;left:14px;right:14px;top:10px;z-index:6;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
@@ -677,7 +685,7 @@ button:focus-visible,input:focus-visible{outline:1px solid var(--accent);outline
 .lc-stages{display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-width:0}
 .lc-stages i{font-style:normal;color:rgba(167,197,215,.3);font-size:10px;margin:0 2px}
 .lc-stage{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:#6d8695;padding:3px 8px;border:1px solid transparent;white-space:nowrap}
-.lc-stage.on{color:#06181a;background:#53e3c4;font-weight:600}
+.lc-stage.on{color:#04121a;background:#00e5ff;font-weight:600;box-shadow:0 0 14px -2px rgba(0,229,255,.8)}
 .lc-cams{display:flex;gap:4px;margin-left:auto;flex:none}
 
 /* 底部：播放 + 时间轴 */
@@ -692,7 +700,7 @@ button:focus-visible,input:focus-visible{outline:1px solid var(--accent);outline
 .lc-tick i{width:9px;height:9px;border-radius:50%;background:#1c2b36;border:1px solid rgba(167,197,215,.4);z-index:1;transition:.2s}
 .lc-tick span{font-family:var(--mono);font-size:8px;letter-spacing:.04em;color:#5d7484;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .lc-tick:hover span{color:#9fb8c5}
-.lc-tick.done i{background:#2b8a72;border-color:#53e3c4}
+.lc-tick.done i{background:#00ffa8;border-color:#00ffa8;box-shadow:0 0 8px rgba(0,255,168,.7)}
 .lc-tick.cur i{background:#53e3c4;border-color:#91e4ff;box-shadow:0 0 10px rgba(83,227,196,.8)}
 .lc-tick.cur span{color:#eafaf6}
 

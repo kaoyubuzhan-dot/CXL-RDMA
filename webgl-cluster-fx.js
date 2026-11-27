@@ -78,26 +78,36 @@
   function addFlow(def) {
     var THREE = ctx.THREE, col = colorKey(def.k);
     var curve = curveFor(def.a, def.b);
-    var w = .0048 * (def.w || 1);
-    var tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 64, w, 6, false),
-      new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0, depthWrite: false }));
-    tube.userData.fadeTo = def.k === 'idle' ? .28 : .5;
+    var w = .0075 * (def.w || 1);
+    var tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 64, w, 7, false),
+      new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+    tube.userData.fadeTo = def.k === 'idle' ? .3 : .78;
     fx.add(tube);
+    anim.push({ kind: 'flow', tube: tube, flows: [] });
 
-    var flows = [];
     if (def.k !== 'idle') {
-      var n = 3 + Math.round(def.w || 1);
+      /* 末端发光箭头 */
+      var endT = curve.getTangentAt(1).normalize();
+      var cone = new THREE.Mesh(new THREE.ConeGeometry(w * 4.4, w * 12, 10),
+        new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+      cone.position.copy(curve.getPointAt(1));
+      cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), endT);
+      cone.userData.fadeTo = .92;
+      cone.raycast = function () {};
+      fx.add(cone);
+      anim.push({ kind: 'flow', tube: cone, flows: [] });
+
+      var n = 4 + Math.round(def.w || 1);
       for (var i = 0; i < n; i++) {
-        var sp = sprite(col, .08 + .022 * (def.w || 1), .95);
+        var sp = sprite(col, .11 + .026 * (def.w || 1), 1);
         sp.userData.flow = {
           curve: curve, t: i / n,
           speed: (def.k === 'move' || def.k === 'copy') ? .17 : .3
         };
         fx.add(sp);
-        flows.push(sp);
+        anim.push({ kind: 'sprite', sp: sp });
       }
     }
-    anim.push({ kind: 'flow', tube: tube, flows: flows });
   }
 
   function addMarker(at, kv, o) {
@@ -106,12 +116,13 @@
     var col = colorKey(o.color) || ctx.C.cxl;
     if (typeof o.color === 'number') col = o.color;
     var g = new THREE.Group();
-    var cube = new THREE.Mesh(new THREE.BoxGeometry(.065, .065, .065),
+    var cube = new THREE.Mesh(new THREE.BoxGeometry(.07, .07, .07),
       new THREE.MeshStandardMaterial({
-        color: 0x0c1c22, metalness: .55, roughness: .3, emissive: col, emissiveIntensity: 1.5
+        color: 0x06131a, metalness: .5, roughness: .25, emissive: col, emissiveIntensity: 2.4
       }));
     g.add(cube);
-    g.add(sprite(col, .16, .85));
+    g.add(sprite(col, .24, .95));
+    g.add(sprite(0xffffff, .09, .8));
     var tag = U.decal(kv, .105, .032, '#eaffff', 22);
     tag.position.y = .062;
     tag.userData.billboard = 1;
@@ -158,18 +169,17 @@
       var curve = new THREE.CatmullRomCurve3([
         A.clone(), A.clone().lerp(tgt, .5).setY(Math.max(A.y, tgt.y) + .32), tgt.clone()
       ], false, 'catmullrom', .4);
-      var tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 44, .0026, 5, false),
-        new THREE.MeshBasicMaterial({ color: C.mon, transparent: true, opacity: 0, depthWrite: false }));
-      tube.userData.fadeTo = .38;
+      var tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 44, .0034, 5, false),
+        new THREE.MeshBasicMaterial({ color: C.mon, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+      tube.userData.fadeTo = .5;
       fx.add(tube);
-      var flows = [];
+      anim.push({ kind: 'flow', tube: tube });
       for (var j = 0; j < 2; j++) {
-        var sp = sprite(C.mon, .05, .85);
+        var sp = sprite(C.mon, .062, .9);
         sp.userData.flow = { curve: curve, t: j / 2 + i * .11, speed: .36 };
         fx.add(sp);
-        flows.push(sp);
+        anim.push({ kind: 'sprite', sp: sp });
       }
-      anim.push({ kind: 'flow', tube: tube, flows: flows });
     });
   }
 
@@ -194,16 +204,17 @@
     anim.forEach(function (a) {
       if (a.kind === 'flow') {
         var f = a.tube.userData;
-        f.curOpacity = Math.min(f.fadeTo, (f.curOpacity || 0) + dt * 2.2);
+        f.curOpacity = Math.min(f.fadeTo, (f.curOpacity || 0) + dt * 2.6);
         a.tube.material.opacity = f.curOpacity;
+      } else if (a.kind === 'sprite') {
+        var u = a.sp.userData.flow;
         if (!ctx.REDUCED) {
-          a.flows.forEach(function (sp) {
-            var u = sp.userData.flow;
-            u.t += dt * u.speed;
-            if (u.t > 1) u.t -= 1;
-            sp.position.copy(u.curve.getPointAt(ctx.clamp01(u.t)));
-          });
+          u.t += dt * u.speed;
+          if (u.t > 1) u.t -= 1;
         }
+        a.sp.position.copy(u.curve.getPointAt(ctx.clamp01(u.t)));
+        var k2 = .75 + .35 * Math.abs(Math.sin(t * 4 + u.t * 9));
+        a.sp.material.opacity = k2;
       } else if (a.kind === 'mover') {
         var mv = a.g.userData.mover;
         if (mv.t < 1) {

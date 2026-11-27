@@ -169,15 +169,24 @@
     }
 
     /** 手绘环境贴图：垂直渐变 + 3 块机房灯斑 → PMREM */
-    function makeEnv(renderer) {
+    function makeEnv(renderer, opts) {
       const cv = document.createElement('canvas');
       cv.width = 512; cv.height = 256;
       const x = cv.getContext('2d');
+      const cool = !!(opts && opts.cool);
       const gr = x.createLinearGradient(0, 0, 0, 256);
-      gr.addColorStop(0, '#1a2c38');
-      gr.addColorStop(.42, '#0c161e');
-      gr.addColorStop(.56, '#05090d');
-      gr.addColorStop(1, '#020508');
+      if (cool) {
+        /* 冷色调（集群霓虹场景）：更暗的环境 + 无暖色灯，避免金属面泛白/泛琥珀 */
+        gr.addColorStop(0, '#0e1a26');
+        gr.addColorStop(.42, '#081018');
+        gr.addColorStop(.56, '#03070b');
+        gr.addColorStop(1, '#010305');
+      } else {
+        gr.addColorStop(0, '#1a2c38');
+        gr.addColorStop(.42, '#0c161e');
+        gr.addColorStop(.56, '#05090d');
+        gr.addColorStop(1, '#020508');
+      }
       x.fillStyle = gr; x.fillRect(0, 0, 512, 256);
 
       function lamp(cx, cy, r, col, a) {
@@ -187,10 +196,16 @@
         g2.addColorStop(1, 'rgba(' + col + ',0)');
         x.fillStyle = g2; x.fillRect(cx - r, cy - r, r * 2, r * 2);
       }
-      lamp(120, 62, 92, '190,228,255', .95);
-      lamp(348, 44, 74, '150,240,214', .7);
-      lamp(452, 96, 60, '255,206,150', .45);
-      lamp(232, 150, 130, '96,150,180', .28);
+      lamp(120, 62, 92, '190,228,255', cool ? .7 : .95);
+      lamp(348, 44, 74, '150,240,214', cool ? .5 : .7);
+      /* cool = 冷色调模式：去掉暖橙灯，金属面不再反射琥珀色 */
+      if (!cool) {
+        lamp(452, 96, 60, '255,206,150', .45);
+        lamp(232, 150, 130, '96,150,180', .28);
+      } else {
+        lamp(452, 96, 60, '120,200,255', .4);
+        lamp(232, 150, 130, '70,160,220', .22);
+      }
 
       const tex = new THREE.CanvasTexture(cv);
       tex.mapping = THREE.EquirectangularReflectionMapping;
