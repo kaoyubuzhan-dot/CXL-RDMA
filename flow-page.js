@@ -96,7 +96,7 @@ window.__RENDER_FLOW__ = (function () {
     var h = '';
 
     h += '<div class="fl-sec"><div class="fl-sec-h"><span>实验场景</span><i>SCENARIO</i></div>' +
-      '<div class="fl-scn-hint">核心入口：原生 RDMA 池水位 × 访问局部性 → S1–S4 分流</div>';
+      '<div class="fl-scn-hint">核心入口：托管载体 × 热点圈层 × 池水位 → S1–S4 分流</div>';
     F.SCENARIOS.forEach(function (sn) {
       h += '<button type="button" class="fl-scn' + (sn.id === s.scenario ? ' is-on' : '') + '" data-scn="' + sn.id + '">' +
         '<span class="fl-scn-k">' + sn.id + '</span>' +

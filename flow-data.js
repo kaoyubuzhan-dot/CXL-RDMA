@@ -7,16 +7,17 @@
  *
  * 【前提焊死】离线增量决策已落板：R1/R3 带 CXL-MHD，R2/R4 无 CXL，
  * 底座统一 Leaf-Spine RDMA —— 硬件固定，四情景共享同一份部署矩阵。
- * 情景差异不是"选哪个池"的自由选择，而是由
- * 原生 RDMA 池水位 & 代价阈值在运行时驱动出来的分流：
- *
- *   Cost(X) = 原生 RDMA 链路代价（全局原生 DRAM 池）
- *   Cost(Y) = 跨机架 RDMA 转发代价 + CXL 访存代价（远端 R1/R3 MHD）
+ * 情景差异由两个分水岭在运行时驱动出来：
+ *   分水岭一「载体」：KV 托管在哪片内存池
+ *     原生 RDMA DRAM 池（普通服务器自带内存）vs 增量 CXL-MHD 池
+ *   分水岭二「热点圈层」：共享热点请求的来源范围
  *   仅当原生池过载、Cost(X) 被抬到极高时 Cost(Y) 才反超：
- *     S1 主力自带 CXL → 本地命中（增量部署主收益）
- *     S2 水位未击穿   → 回退原生池，主动无视增量硬件
- *     S3 水位击穿     → 兜底借用远端增量池（S3 不是常态）
- *     S4 长期共享热点 → 复制托管增量池（区别于 S3 单次溢流救急）
+ *     S1 机架内生热点（短域复用）        → 本地 MHD 就近命中
+ *     S2 圈层内公共长上下文（封闭 R2/R4）→ 原生池承载，CXL 不介入
+ *     S3 原生池过载（资源耗尽危机）      → 兜底借用远端增量池
+ *     S4 全域公共长上下文（四方并发）    → 托管增量池 + 管控链路竞争
+ *   S2/S4 同属共享长上下文，但热点圈层与托管载体完全不同——
+ *   S2 共享域=原生机架圈、载体=原生池；S4 共享域=全域、载体=增量池。
  *
  * 每阶段描述：act 动作 · obj 对象 · why 原因 · res 结果
  * 场景新增字段：
@@ -65,24 +66,30 @@ window.FLOW = (function () {
         why: '同上 · 观察负载形态是否收敛后再评估' }
     ] };
 
-  /* ── 四情景：硬件固定，差异全部在运行时由水位判定驱动 ── */
+  /* ── 四情景：硬件固定，差异全部在运行时由两个分水岭驱动 ──
+   * 分水岭一「载体」：KV 托管在原生 RDMA DRAM 池还是增量 CXL-MHD 池
+   * 分水岭二「热点圈层」：共享热点的请求来源是否触及带 CXL 的机架
+   *   S1 机架内生热点（短域复用）      → 本地 MHD 就近命中
+   *   S2 圈层内公共长上下文（封闭在 R2/R4）→ 原生池承载，CXL 不介入
+   *   S3 原生池过载（资源耗尽危机驱动）  → 兜底借用远端增量池
+   *   S4 全域公共长上下文（四方并发）    → 托管增量池 + 管控链路竞争 */
   var SCENARIOS = [
-    { id: 'S1', zh: '热点原生命中', en: 'LOCAL-HIT',
-      brief: '访问源 R1/R3（自带 CXL）· 历史热点就近命中本地 MHD',
+    { id: 'S1', zh: '本机架局部热点', en: 'RACK-LOCAL',
+      brief: 'R1/R3 机架内生热点 · 短域复用 → 本地 MHD 就近命中',
       kv: 'KV-001', prod: 'R1-N1', hot: 82, local: 70, dst: 'R1 / MHD-1', tier: 'CXL MHD（本地增量池）',
       replica: '—', ver: 'V1', delay: '0.9 µs', load: '48%', occ: '63%',
       r1score: 86, r3score: 64, r3cong: 86,
       place: 'mhd', pool: { used: 6, cong: 42, note: '水位正常' },
       jq: '主力访问机架是否自带 CXL 增量池？',
       jyes: '是 · 主力自带增量池 → 本地 MHD 就近命中（本情景）',
-      jno: '否 · RDMA-only 机架 → 进入溢流代价评估（S2 / S3 走向）',
+      jno: '否 · RDMA-only 机架 → 进入载体 / 圈层判定（S2 / S3 走向）',
       jpick: 'yes',
-      verdict: '是 · 主力 R1/R3（自带 CXL）',
-      vdWhy: '请求分布 70% 落在 R1/R3 · 热度周期长期稳定 · 主力机架自带增量池 → 本地命中零转发',
+      verdict: '是 · 机架内生热点 · 本地命中',
+      vdWhy: '请求分布 70% 落在 R1/R3 · 机架内生热局部性 · 短域复用不跨机架 → 就近命中零转发',
       mx: { rica: '0.9 µs', naive: '4.3 µs', gain: '-67%', cap: '12%', xr: '0.3 GB/s',
-        basis: '主力机架自带 CXL → 本地放置收益最大；朴素策略强行远端化只会白占容量（示意，非实测）' },
+        basis: '机架内生热点就近命中 → 增量部署捕获基础低延迟收益；朴素策略强行远端化只会白占容量（示意，非实测）' },
       cands: [
-        { id: 'A', t: '本地 CXL', to: 'R1-MHD-1', ok: true, why: '主力机架 · 本地命中' },
+        { id: 'A', t: '本地 CXL', to: 'R1-MHD-1', ok: true, why: '机架内生热点 · 本地命中' },
         { id: 'C', t: '远端 MHD', to: 'R3', ok: false, why: '跨机架叠加 · 收益衰减' },
         { id: 'D', t: 'RDMA Pool', to: 'POOL', ok: false, why: '水位正常 · 延迟仍高于本地 CXL' }
       ],
@@ -91,53 +98,54 @@ window.FLOW = (function () {
       ov: {
         locality: {
           caption: '主力 R1/R3 自带 CXL 增量池 → 判定：本地 MHD 就近命中',
-          res: 'S1 走向：增量部署设计瞄准的主收益场景 —— 访问不离开主力机架'
+          res: 'S1 走向：机架内生热点的短域复用 —— 增量部署瞄准的基础收益场景'
         }
       } },
-    { id: 'S2', zh: '轻度溢流 · 回退原生池', en: 'NATIVE-FALLBACK',
-      brief: 'R2/R4 溢流 · 原生池余量充足 → 主动无视 CXL，回退底座',
-      kv: 'KV-002', prod: 'R2-N1', hot: 66, local: 12, dst: 'RDMA Pool-A（原生池）', tier: '原生 DRAM RDMA 池',
+    { id: 'S2', zh: '热点落在原生池', en: 'NATIVE-CIRCLE',
+      brief: 'R2/R4 圈层内公共长上下文 · 托管原生 DRAM 池 → CXL 不介入',
+      kv: 'KV-002', prod: 'R2-N1', hot: 78, local: 12, dst: 'RDMA Pool-A（原生池）', tier: '原生 DRAM RDMA 池',
       replica: '—', ver: 'V2', delay: '4.1 µs', load: '35%', occ: '0%',
       r1score: 86, r3score: 64, r3cong: 86,
       place: 'pool', pool: { used: 8, cong: 35, note: '余量充足' },
-      jq: '原生 RDMA 池水位是否击穿代价阈值？',
-      jyes: '是 · 水位击穿 → 兜底借用远端增量池（S3 走向）',
-      jno: '否 · 余量充足 → 回退原生池，主动无视 CXL（本情景）',
+      jq: '共享热点圈层是否触及 CXL 机架？',
+      jyes: '是 · 热点击穿圈层 → 载体切向增量池（S4 走向）',
+      jno: '否 · 圈层封闭 + 水位未击穿 → 留在原生池（本情景）',
       jpick: 'no',
-      verdict: '是 · 主力 R2（RDMA-only）· 水位未击穿',
-      vdWhy: 'Cost(X)=4.1µs vs Cost(Y)=5.6µs · 原生池水位 57% 拥塞 35% —— 有 CXL 但不值得用',
+      verdict: '是 · 圈层封闭 · 原生池承载',
+      vdWhy: '公共长上下文仅在 R2/R4 圈层流转 · R1/R3 几乎不访问 · 水位 57% 拥塞 35% 未击穿 · Cost(Y)=5.6µs > Cost(X)=4.1µs',
       mx: { rica: '4.1 µs', naive: '5.6 µs', gain: '-27%', cap: '0%', xr: '0 GB/s',
-        basis: '远端 MHD = 跨机架转发 + 远端访存叠加，比原生池更慢 → 调度器主动无视增量硬件（示意，非实测）',
-        fn: '* 朴素策略 = 无视原生池水位，一律推远端 CXL · 示意，非实测' },
+        basis: '共享热点圈层落在原生机架 → 增量 CXL 远水解不了近渴，强行迁移收益为负（示意，非实测）',
+        fn: '* 朴素策略 = 无视热点圈层与水位，一律推远端 CXL · 示意，非实测' },
       cands: [
-        { id: 'A', t: '原生 RDMA Pool', to: 'POOL', ok: true, why: '水位 57% · 余量充足 · 4.1 µs' },
-        { id: 'C', t: '远端 R1 MHD', to: 'R1-X', ok: false, why: '转发 + 访存叠加 · 5.6 µs 更慢' },
-        { id: 'B', t: '复制到 CXL', to: 'R3', ok: false, why: '单源溢流 · 无共享收益' }
+        { id: 'A', t: '原生 RDMA Pool', to: 'POOL', ok: true, why: '圈层热点 · 原生池承载 · 4.1 µs' },
+        { id: 'C', t: '远端 R1 MHD', to: 'R1-X', ok: false, why: '转发 + 访存叠加 · 收益为负' },
+        { id: 'B', t: '复制到 CXL', to: 'R3', ok: false, why: 'R1/R3 几乎不访问 · 复制无意义' }
       ],
       deploy: ['R1', 'R3'],
       decision: OFFLINE_DEC,
       ov: {
         locality: {
-          caption: '主力 R2 无 CXL 硬件 · Cost(Y)=5.6µs > Cost(X)=4.1µs → 判定：回退原生池',
-          res: 'S2 走向：增量硬件摆在那里，但系统主动无视它 —— 原生底座足够'
+          caption: '共享热点封闭在 R2/R4 圈层 · 原生池有余量 → 判定：留在原生池，CXL 不介入',
+          res: 'S2 走向：热点集合不触及带 CXL 机架，增量硬件天然无法介入 —— 有 CXL 但不用'
         },
+        gen: { res: 'R2/R4 任务爆发：跨任务共享的长上下文 KV 在原生机架圈层内流转（示意）' },
         decide: {
           caption: '离线增量决策已落板（硬件固定）· 本情景 KV 直写原生池',
-          why: '部署是离线一次性决策，不随单个 KV 变化；运行时走哪个池由 04 判定的水位与代价决定',
+          why: '部署是离线一次性决策，不随单个 KV 变化；运行时走哪个池由 04 判定的圈层与水位决定',
           res: 'T1 执行后硬件就位，但 {kv} 直写 RDMA Pool-A，不碰 CXL'
         },
         access: {
-          caption: 'R2 经 RDMA 访问原生池 · 4.1 µs —— 水位未击穿时这就是最优路径',
-          res: '增量硬件在场但不参与：不新增跨机架转发，原生池余量吸收溢流'
+          caption: 'R2/R4 经 RDMA 访问原生池 · 4.1 µs —— 圈层内共享的最优路径',
+          res: '增量硬件在场但不参与：热点圈层本身不流向 CXL 机架，原生池余量吸收共享流量'
         },
         migrate: {
-          caption: '无迁移 / 无复制：溢流 KV 留在原生池',
-          res: '只有原生体系排队延迟击穿阈值，把 KV 搬进远端 MHD 这笔投资才划算'
+          caption: '无迁移 / 无复制：圈层共享 KV 留在原生池',
+          res: '共享域 = 原生机架圈 · 载体 = 原生 DRAM 池 —— 强行搬进远端 MHD 只会引入叠加代价'
         },
         evict: { res: '热度回落 → Directory 标记 invalid，原生池容量回收复用' }
       } },
     { id: 'S3', zh: '原生池过载 · 增量兜底', en: 'OVERLOAD-BAILOUT',
-      brief: 'R2/R4 溢流 · 原生池耗尽拥塞爆炸 → Cost(Y) 反超，借用增量池',
+      brief: '原生池饱和 · 排队延迟爆炸 → 增量池做过载安全阀',
       kv: 'KV-003', prod: 'R2-N1', hot: 74, local: 12, dst: 'R1 / MHD-1（远端增量池）', tier: 'CXL MHD（过载兜底）',
       replica: '—', ver: 'V3', delay: '4.9 µs', load: '88%', occ: '61%',
       r1score: 86, r3score: 64, r3cong: 86,
@@ -146,22 +154,22 @@ window.FLOW = (function () {
       jyes: '是 · Cost(X)=7.8µs 爆炸 → 借增量池兜底（本情景）',
       jno: '否 · 余量充足 → 回退原生池（S2 走向）',
       jpick: 'yes',
-      verdict: '是 · 主力 R2（RDMA-only）· 原生池过载',
-      vdWhy: '原生池水位 93% 拥塞 88% · Cost(X)=7.8µs 击穿阈值 → Cost(Y)=4.9µs 反超，兜底激活',
+      verdict: '是 · 资源耗尽危机 · 兜底激活',
+      vdWhy: '原生池水位 93% 拥塞 88% · Cost(X)=7.8µs 击穿阈值 → Cost(Y)=4.9µs 反超 · 触发根源是资源饱和，不是全域共享',
       mx: { rica: '4.9 µs', naive: '7.8 µs', gain: '-37%', cap: '9%', xr: '一次性 16 GB',
-        basis: '原生池排队延迟爆炸抬升 Cost(X) → 远端 MHD 叠加开销后依然更优；增量池是过载兜底而非优先选项（示意，非实测）',
+        basis: '增量池是过载安全阀 / 应急通道，不是为常态共享热点设计 —— 收益边界由水位阈值划定（示意，非实测）',
         fn: '* 朴素策略 = 无视水位，硬挤过载的原生池 · 示意，非实测' },
       cands: [
         { id: 'C', t: '远端 R1 MHD', to: 'R1-MHD-1', ok: true, why: 'Cost(Y)=4.9µs < Cost(X)=7.8µs' },
         { id: 'A', t: '原生 RDMA Pool', to: 'POOL', ok: false, why: '水位 93% · 排队 7.8 µs 击穿阈值' },
-        { id: 'B', t: '复制到 CXL', to: 'R3', ok: false, why: '单次溢流 · 迁移即可，无需副本' }
+        { id: 'B', t: '复制到 CXL', to: 'R3', ok: false, why: '应急通道 · 迁移即可，无需副本' }
       ],
       deploy: ['R1', 'R3'],
       decision: OFFLINE_DEC,
       ov: {
         locality: {
-          caption: '主力 R2 无 CXL · 原生池水位 93% 拥塞 88% → 判定：兜底借用远端增量池',
-          res: 'S3 走向：不是"想蹭 CXL"，是原生体系扛不住 —— 增量池做兜底加速'
+          caption: '原生池水位 93% 拥塞 88% → 判定：兜底借用远端增量池',
+          res: 'S3 走向：第一驱动力是资源耗尽危机，不是多机架共享 —— 增量池是应急通道'
         },
         decide: {
           caption: '离线增量决策已落板（硬件固定）· 本情景 KV 兜底写入远端增量池',
@@ -170,51 +178,51 @@ window.FLOW = (function () {
         access: {
           caption: 'R2 经 Leaf-Spine RDMA 跨机架读取 R1-MHD-1 · 4.9 µs',
           why: '跨机架转发 + 远端访存叠加的兜底代价，仍优于挤爆的原生池（7.8 µs）',
-          res: '延迟 4.9 µs —— 劣于 S1 本地 0.9 µs，但优于过载原生池；增量池只是兜底'
+          res: '延迟 4.9 µs —— 劣于 S1 本地 0.9 µs，但优于过载原生池；安全阀不该被常态流量占用'
         },
         migrate: {
-          caption: '单次溢流 → 迁移而非复制：{kv} 迁入 R1-MHD-1，原生池压力缓释',
-          res: '迁移完成后原生池水位回落；若过载持续，长期托管将演化成 S4 形态'
+          caption: '临时溢流 → 迁移而非复制：{kv} 迁入 R1-MHD-1，原生池压力缓释',
+          res: '迁移完成后原生池水位回落；若长上下文升温且共享域扩大，将演化成 S4 形态'
         },
-        evict: { res: '原生池水位回落 → {kv} 迁回 RDMA Pool，增量池容量让位给新的兜底请求' }
+        evict: { res: '原生池水位回落 → {kv} 迁回 RDMA Pool，应急通道让位给新的兜底请求' }
       } },
-    { id: 'S4', zh: '多机架长期共享热点', en: 'SHARED-HOTSPOT',
-      brief: 'R1–R4 持续并发读同一 KV · 长期托管增量池，复制分发',
-      kv: 'KV-004', prod: 'R1-N1', hot: 93, local: 55, dst: 'R1-MHD-1 + R3-MHD-3（副本）', tier: 'CXL MHD（长期托管）',
+    { id: 'S4', zh: '全域公共长上下文', en: 'GLOBAL-SHARED',
+      brief: 'R1–R4 四方并发访问 · 托管增量 CXL-MHD 池 · 全域共享热点',
+      kv: 'KV-004', prod: 'R1-N1', hot: 93, local: 55, dst: 'R1-MHD-1 + R3-MHD-3（副本）', tier: 'CXL MHD（全域托管）',
       replica: 'R1-MHD-1 · R3-MHD-3', ver: 'V4', delay: '1.1 µs', load: '62%', occ: '78%',
       r1score: 86, r3score: 64, r3cong: 86,
       place: 'copy', pool: { used: 9, cong: 58, note: '中度' },
-      jq: '是否为跨机架长期共享热点？',
-      jyes: '是 · 复用周期长 → 一次复制分发，长期托管增量池（本情景）',
-      jno: '否 · 单次溢流 → 按原生池水位判定（S2 / S3 走向）',
+      jq: '共享长上下文是否突破机架圈层？',
+      jyes: '是 · 全域热点 → 托管增量池并管控链路竞争（本情景）',
+      jno: '否 · 圈层封闭 → 留在原生池（S2 走向）',
       jpick: 'yes',
-      verdict: '是 · 多机架长期共享热点',
-      vdWhy: 'R1/R3 与 R2/R4 持续并发读 · 复用周期长 · 与 S3 单次溢流兜底不同：关心反复访问的平均收益',
+      verdict: '是 · 全域共享长上下文',
+      vdWhy: '热点击穿机架边界 · R1/R3 本地命中 + R2/R4 持续跨 RDMA 拉取 · 共享域=全域 · 载体=增量 MHD 池',
       mx: { rica: '1.1 µs', naive: '4.3 µs', gain: '-74%', cap: '18%', xr: '一次性 32 GB',
-        basis: '长期共享热点 → 一次复制分发，R1/R3 本地命中吸收大部分读流量；R2/R4 偶发远端读 · 复用收益随时间累积（示意，非实测）' },
+        basis: '全域共享热点托管增量池：R1/R3 本地命中吸收大半流量，R2/R4 持续跨 RDMA 拉取 —— 多源并发下权衡延迟与拥塞（示意，非实测）' },
       cands: [
         { id: 'A', t: '副本 → R1 CXL', to: 'R1-MHD-1', ok: true, why: 'R1 持续请求 · 副本落地' },
         { id: 'B', t: '副本 → R3 CXL', to: 'R3-MHD-3', ok: true, why: 'R3 持续请求 · 副本落地' },
-        { id: 'C', t: '原生 RDMA Pool', to: 'POOL', ok: false, why: '跨机架读风暴 · 持续压 Spine' }
+        { id: 'C', t: '原生 RDMA Pool', to: 'POOL', ok: false, why: '全域读压 Spine · 增量红利归零' }
       ],
       deploy: ['R1', 'R3'],
       decision: OFFLINE_DEC,
       ov: {
         locality: {
-          caption: 'R1–R4 持续并发请求同一 KV · 复用周期长 → 判定：长期共享热点',
-          res: 'S4 走向：不是单次溢流救急（S3），而是长期托管 —— 复制分发到增量池'
+          caption: '热点击穿机架边界 · R1–R4 四方并发 → 判定：全域共享长上下文',
+          res: 'S4 走向：共享域=全域、载体=增量池 —— 最苛刻工况：同时服务本地低延迟与远端跨机架访问'
         },
-        gen: { res: '长期共享：同一段多轮会话前缀被 R1–R4 持续并发请求（示意）' },
+        gen: { res: '全域共享：同一段长上下文被 R1–R4 四方推理任务同时高频复用（示意）' },
         decide: {
-          caption: '离线增量决策已落板（硬件固定）· 本情景 KV 复制托管增量池',
+          caption: '离线增量决策已落板（硬件固定）· 本情景 KV 托管增量池',
           res: '{kv} 原件落入 R1-MHD-1，并复制副本至 R3-MHD-3'
         },
         access: {
-          caption: 'R1/R3 本机架命中副本 0.9–1.1 µs · R2/R4 偶发经 RDMA 远端读',
-          res: '大部分读被机架内 CXL 吸收，Spine 只承载偶发远端读'
+          caption: 'R1/R3 本机架命中 0.9–1.1 µs · R2/R4 持续跨 RDMA 拉取',
+          res: '本地低延迟与远端拉取并存，Spine 拥塞动态游走 —— 多源并发的链路竞争权衡'
         },
         migrate: {
-          caption: '复制优先：共享 KV 在 R1/R3 MHD 各存一份副本，原件保留（多读场景不宜迁移）',
+          caption: '复制优先：全域共享 KV 在 R1/R3 MHD 各存一份副本，原件保留',
           res: '副本落位：R1-MHD-1 + R3-MHD-3 · Directory 版本 {ver} 记录多副本映射'
         },
         evict: { res: '复用热度回落 → 先回收副本，原件下沉 RDMA Pool' }
@@ -255,11 +263,11 @@ window.FLOW = (function () {
     },
     {
       id: 'locality', n: '04', zh: '局部性判定', en: 'LOCALITY JUDGE',
-      caption: '运行时核心分叉：主力在哪 · 原生池水位是否击穿阈值？→ 判定：{verdict}',
-      act: 'Locality Judge 结合请求分布与原生 RDMA 池水位，回答两个问题：访问主力在哪、Cost(X)（原生池）与 Cost(Y)（远端 MHD）谁更低',
-      obj: '{kv} · 请求分布 · 原生池水位 · Cost(X)/Cost(Y) → 判定：{verdict}',
+      caption: '运行时核心分叉：热点圈层在哪 · 托管哪片池 · 水位是否击穿？→ 判定：{verdict}',
+      act: 'Locality Judge 回答两个分水岭：热点圈层在哪（决定载体——原生池还是增量池）、原生池水位是否击穿代价阈值（决定是否兜底）',
+      obj: '{kv} · 请求分布 · 热点圈层 · 原生池水位 · Cost(X)/Cost(Y) → 判定：{verdict}',
       why: '{vdWhy}',
-      res: '所有运行时放置从这一判定点分流：S1 本地命中 / S2 回退原生 / S3 兜底借用 / S4 复制托管',
+      res: '所有运行时放置从这一判定点分流：S1 本地命中 / S2 原生池承载 / S3 过载兜底 / S4 全域托管',
       metrics: { 延迟: '—', 链路: '{load}', 占用: '{occ}' },
       anim: { type: 'locality' }
     },

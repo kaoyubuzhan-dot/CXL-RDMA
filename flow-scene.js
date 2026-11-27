@@ -880,7 +880,7 @@ window.FLOW_SCENE = (function () {
         }, dl);
       });
       later(function () {
-        callout(L.pool.x + 90, L.pool.y - 40, '第一步 · 一次复制分发完成', '长期托管 → 之后大部分读走机架内 CXL', '#8fc6f2');
+        callout(L.pool.x + 90, L.pool.y - 40, '第一步 · 一次复制分发完成', '全域托管 → 大部分读走机架内 CXL', '#8fc6f2');
       }, 2100);
       later(function () {
         [['R1', 'MHD-1'], ['R3', 'MHD-3']].forEach(function (cfg) {
@@ -919,8 +919,8 @@ window.FLOW_SCENE = (function () {
         move(t2, rdC, { dur: 2200 });
       }, 4300);
       later(function () {
-        callout(rackX(1) - 10, L.rack.y - 26, '对照 · R2/R4 偶发远端读',
-          '经 RDMA 读取 R1 副本 · Spine 只承载偶发流量', '#f0785a');
+        callout(rackX(1) - 10, L.rack.y - 26, '对照 · R2/R4 持续跨机架读',
+          '无 CXL 机架经 RDMA 拉取 · Spine 拥塞动态游走', '#f0785a');
       }, 4400);
       return;
     }
