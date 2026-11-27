@@ -74,6 +74,36 @@
 .hv-lbl b{display:block;font-weight:500;font-size:10px;color:#fff}
 .hv-lbl i{display:block;font-style:normal;font-size:8px;color:#8fb6cc;margin-top:1px}
 
+/* 02 页：S1–S4 场景切换 + 机架信息卡 */
+.hv-ui{position:absolute;left:16px;top:62px;z-index:5;display:flex;flex-direction:column;gap:8px;
+  max-width:min(560px,62%);pointer-events:none}
+.hv-ui>*{pointer-events:auto}
+.hv-tabs{display:flex;gap:6px;flex-wrap:wrap}
+.hv-tab{display:flex;align-items:center;gap:7px;padding:5px 10px;cursor:pointer;
+  border:1px solid rgba(167,197,215,.2);background:rgba(4,10,16,.8);color:#9db0bd;transition:.16s}
+.hv-tab b{font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:#7dc9df}
+.hv-tab span{font-family:var(--cn);font-size:10px;letter-spacing:.04em;white-space:nowrap}
+.hv-tab:hover{color:#e6f2f8;border-color:rgba(125,201,223,.5)}
+.hv-tab.is-on{background:rgba(125,201,223,.16);border-color:#7dc9df;color:#eaf6fb}
+.hv-tab.is-on b{color:#91e4ff}
+.hv-cap{background:rgba(4,10,16,.82);border-left:2px solid #7dc9df;padding:7px 11px;max-width:520px}
+.hv-cap b{display:block;font-family:var(--cn);font-size:11px;color:#e6f2f8;letter-spacing:.05em}
+.hv-cap span{display:block;margin-top:3px;font-family:var(--cn);font-size:10px;line-height:1.65;color:#93aab8}
+.hv-card{display:none;width:250px;background:rgba(5,12,18,.94);
+  border:1px solid rgba(167,197,215,.25);padding:10px 12px;box-shadow:0 12px 30px rgba(0,0,0,.5)}
+.hv-card.is-on{display:block}
+.hv-card-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px;
+  border-bottom:1px solid rgba(167,197,215,.16);padding-bottom:6px;margin-bottom:7px}
+.hv-card-h b{font-family:var(--mono);font-size:14px;color:#eaf6fb}
+.hv-card-h span{font-family:var(--cn);font-size:9px}
+.hv-card ul{margin:0 0 9px;padding:0;list-style:none}
+.hv-card li{font-family:var(--cn);font-size:10px;color:#a9c0cd;line-height:1.75}
+.hv-card li::before{content:"·";margin-right:6px;color:#53e3c4}
+.hv-jump{width:100%;padding:6px;cursor:pointer;color:#cfeaf4;
+  border:1px solid rgba(125,201,223,.45);background:rgba(125,201,223,.12);
+  font-family:var(--mono);font-size:10px;letter-spacing:.04em}
+.hv-jump:hover{background:rgba(125,201,223,.24);color:#fff}
+
 /* 窄屏：收窄左右栏，给舞台更多宽度；控制台控件同步压缩 */
 @media(max-width:1400px){
   :root{--side-l:250px;--side-r:286px}

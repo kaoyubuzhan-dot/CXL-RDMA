@@ -159,9 +159,9 @@
     }
     host.style.display = '';
     window.HEAVY_CLUSTER.mount(host, {
-      onRack: id => {
+      onJump: id => {
         STATE.selectedRack = id;
-        toast('选中 ' + id + ' · 打开机架解剖');
+        toast('打开 ' + id + ' 机架解剖');
         APP.switchPage('rack');
       }
     });

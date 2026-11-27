@@ -1,54 +1,73 @@
 /* ============================================================
- * heavy-cluster.js — 02 集群总览 · 重型三维场景
+ * heavy-cluster.js — 02 集群总览 · 重型三维集群（v2 语义修正）
  *
- * 按「大气磅礴」改造方案实现，但不引入 ES Module 与后处理：
- *   全局 THREE + 假泛光（发光 sprite + ACES 色调映射）
- *   · 34° 长焦镜头、镜面地板、FogExp2 深邃雾效
- *   · 4 台宽体重型机柜（承重底座 / 发光地脚 / 密集刀片 / 玻璃门）
- *   · 中央全息调度枢纽（八角底座 + 反向旋转陀螺环 + 雷达波纹）
- *   · 顶部重型跨接交换桥架
- *   · 双层法兰玻璃粗管道 + 高速流光粒子（替代单根细线）
- *   · 三色对撞：电光蓝（计算）/ 翡翠绿（CXL 池）/ 琥珀橙（迁移）
+ * 机架只有两种身份：
+ *   R1 / R3 = CXL + RDMA（增量部署：GPU 服务器 + CXL Switch + 共享 MHD）
+ *   R2 / R4 = RDMA only（存量机架：GPU 服务器 + 本地 DRAM）
  *
- * API：HEAVY_CLUSTER.mount(el, {onRack}) / .unmount() / .available
+ * S1–S4 是【运行场景】，不是机架角色；切换场景只改变数据/信息怎么流动：
+ *   S1 本地 CXL 优势        R1 柜内 GPU → MHD（青绿）
+ *   S2 突发 KV → 原生 RDMA  R2 ↔ R4 共享本地 DRAM（蓝）
+ *   S3 原生池过载 → 兜底    R2/R4 溢出到 R1/R3 的 MHD（橙）
+ *   S4 全域长上下文 → 复制  R1/R3 的 KV 复制到全部机架（紫）
+ *
+ * 交互：点击机架先出信息卡（不直接跳转），卡上按钮才进 03 机架解剖。
+ * 复用全局 THREE + OrbitControls，不引入 ES Module / 后处理。
  * ============================================================ */
 window.HEAVY_CLUSTER = (function () {
   'use strict';
 
   var THREE = window.THREE;
-  if (!THREE) {
-    return { available: false, mount: function () {}, unmount: function () {} };
-  }
+  if (!THREE) return { available: false, mount: function () {}, unmount: function () {} };
+
+  var C = {
+    cxl: 0x53e3c4, rdma: 0x5f9fe8, move: 0xe6a056, copy: 0xa38bf2,
+    ctl: 0xe4b66b, cyan: 0x91e4ff
+  };
 
   var host = null, renderer = null, scene = null, camera = null, controls = null;
   var clock = null, running = false, rafId = 0, inited = false;
-  var racks = [], pipelines = [], clickable = [], labelEls = [], labelDefs = [];
-  var labelLayer = null, hub = null, radar = null, onRackCb = null;
-  var raycaster, pointer = new THREE.Vector2(), glowTex = null, envTex = null;
-  var reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var racks = [], rackMap = {}, clickable = [], labelEls = [], labelDefs = [];
+  var labelLayer = null, hub = null, radar = null, flowGroup = null, ctlGroup = null;
+  var onJumpCb = null, raycaster, pointer = new THREE.Vector2(), glowTex = null;
+  var scenario = 'S1', selected = null;
+  var ui = {};
 
-  var COL = { blue: 0x00a8ff, green: 0x00ff9d, orange: 0xff7b00, cyan: 0x00f0ff };
+  var reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-  /* ── 工具 ── */
+  var SCEN = {
+    S1: { tag: '本地 CXL 优势', desc: 'KV 生产与消费都在同一机架内，走柜内 CXL 直连 MHD，完全绕开 RDMA 网络。', racks: ['R1'] },
+    S2: { tag: '突发 KV → 原生 RDMA', desc: '访问突发、KV 需求超过本地容量时，直接用存量 RDMA 共享各机架本地 DRAM。', racks: ['R2', 'R4'] },
+    S3: { tag: '原生池过载 → CXL 兜底', desc: 'R2/R4 的原生内存池放不下，溢出部分兜底写入 R1/R3 的共享 MHD。', racks: ['R2', 'R4', 'R1', 'R3'] },
+    S4: { tag: '全域长上下文 → 迁移复制', desc: '长上下文被所有机架共用；初始落在 CXL 节点，随后复制到其它机架就近访问。', racks: ['R1', 'R3', 'R2', 'R4'] }
+  };
+
+  var RACK_DEF = [
+    { id: 'R1', cxl: true, pos: [-3.9, 0, 3.3] },
+    { id: 'R2', cxl: false, pos: [3.9, 0, 3.3] },
+    { id: 'R3', cxl: true, pos: [-3.9, 0, -3.3] },
+    { id: 'R4', cxl: false, pos: [3.9, 0, -3.3] }
+  ];
+
+  /* ── 光晕贴图 ── */
   function glowTexture() {
     if (glowTex) return glowTex;
     var cv = document.createElement('canvas'); cv.width = cv.height = 128;
     var x = cv.getContext('2d');
     var g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
     g.addColorStop(0, 'rgba(255,255,255,1)');
-    g.addColorStop(.35, 'rgba(255,255,255,.45)');
+    g.addColorStop(.32, 'rgba(255,255,255,.5)');
     g.addColorStop(1, 'rgba(255,255,255,0)');
     x.fillStyle = g; x.beginPath(); x.arc(64, 64, 64, 0, Math.PI * 2); x.fill();
     glowTex = new THREE.Texture(cv); glowTex.needsUpdate = true;
     return glowTex;
   }
   function glowSprite(color, size, opacity) {
-    var m = new THREE.SpriteMaterial({
+    var s = new THREE.Sprite(new THREE.SpriteMaterial({
       map: glowTexture(), color: color, transparent: true,
-      opacity: opacity == null ? .75 : opacity,
+      opacity: opacity == null ? .6 : opacity,
       blending: THREE.AdditiveBlending, depthWrite: false
-    });
-    var s = new THREE.Sprite(m);
+    }));
     s.scale.set(size, size, 1);
     return s;
   }
@@ -60,297 +79,349 @@ window.HEAVY_CLUSTER = (function () {
 
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x030711);
-    scene.fog = new THREE.FogExp2(0x030711, 0.022);
+    scene.fog = new THREE.FogExp2(0x030711, 0.018);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.18;
+    renderer.toneMappingExposure = 1.16;
     host.appendChild(renderer.domElement);
 
     camera = new THREE.PerspectiveCamera(34, 1, .1, 260);
-    camera.position.set(15.0, 15.5, 17.0);
+    camera.position.set(11.5, 17.5, 13.5);
 
     controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = !reduced;
+    controls.enableDamping = !reducedMotion;
     controls.dampingFactor = .05;
-    controls.maxPolarAngle = Math.PI / 2.12;
-    controls.target.set(0, 1.9, 0);
-    controls.minDistance = 6;
-    controls.maxDistance = 40;
+    controls.maxPolarAngle = Math.PI / 2.02;
+    controls.minDistance = 8;
+    controls.maxDistance = 42;
+    controls.target.set(0, 1.6, 0);
 
-    /* 环境反射：有内置工具就用它生成，否则退化为纯灯光 */
     try {
       if (window.__GLUTILS__) {
         var U = window.__GLUTILS__(THREE);
-        envTex = U.makeEnv(renderer);
-        scene.environment = envTex;
-        if ('environmentIntensity' in scene) scene.environmentIntensity = .55;
+        scene.environment = U.makeEnv(renderer);
+        if ('environmentIntensity' in scene) scene.environmentIntensity = .5;
       }
-    } catch (e) { envTex = null; }
+    } catch (e) {}
 
     clock = new THREE.Clock();
     raycaster = new THREE.Raycaster();
+    flowGroup = new THREE.Group(); scene.add(flowGroup);
+    ctlGroup = new THREE.Group(); scene.add(ctlGroup);
+
+    /* ?hs=S3 直达某个运行场景 */
+    try {
+      var q = new URLSearchParams(location.search).get('hs');
+      if (q && SCEN[q]) scenario = q;
+    } catch (e) {}
 
     buildEnvironment();
     buildHub();
-    buildRacksAndBridge();
-    buildPipelines();
+    buildRacks();
+    buildControlLinks();
     ensureLabels();
+    buildUI();
     wireEvents();
+    applyScenario(scenario, true);
   }
 
-  /* ── 地板 / 雾 / 远景 ── */
+  /* ── 环境 ── */
   function buildEnvironment() {
-    scene.add(new THREE.AmbientLight(0x1e293b, 1.05));
-
-    var key = new THREE.DirectionalLight(0x38bdf8, 1.55);
-    key.position.set(12, 22, 14);
-    scene.add(key);
-
-    var fill = new THREE.DirectionalLight(0xff7b00, .28);
-    fill.position.set(-14, 8, -10);
-    scene.add(fill);
+    scene.add(new THREE.AmbientLight(0x1e293b, 1.1));
+    var key = new THREE.DirectionalLight(0x38bdf8, 1.5);
+    key.position.set(12, 22, 14); scene.add(key);
+    var warm = new THREE.DirectionalLight(0xe6a056, .25);
+    warm.position.set(-14, 9, -10); scene.add(warm);
 
     var floor = new THREE.Mesh(
       new THREE.PlaneGeometry(200, 200),
-      new THREE.MeshStandardMaterial({ color: 0x050b16, roughness: .18, metalness: .88 })
+      new THREE.MeshStandardMaterial({ color: 0x050b16, roughness: .2, metalness: .86 })
     );
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = false;
-    scene.add(floor);
+    floor.rotation.x = -Math.PI / 2; scene.add(floor);
 
     var grid = new THREE.GridHelper(140, 90, 0x0c4a6e, 0x081a30);
     grid.position.y = .012;
-    grid.material.transparent = true;
-    grid.material.opacity = .26;
+    grid.material.transparent = true; grid.material.opacity = .24;
     scene.add(grid);
 
-    /* 远景机柜剪影：拉出纵深，避免背景空旷 */
-    var bgMat = new THREE.MeshBasicMaterial({ color: 0x081222, transparent: true, opacity: .75 });
+    var bgMat = new THREE.MeshBasicMaterial({ color: 0x081222, transparent: true, opacity: .72 });
     for (var i = -4; i <= 4; i++) {
       if (Math.abs(i) < 2) continue;
-      var h = 4.6 + (Math.abs(i) % 3) * 1.2;
-      var sil = new THREE.Mesh(new THREE.BoxGeometry(2.4, h, 2.0), bgMat);
+      var h = 4.4 + (Math.abs(i) % 3) * 1.1;
+      var sil = new THREE.Mesh(new THREE.BoxGeometry(2.3, h, 2.0), bgMat);
       sil.position.set(i * 4.6, h / 2, -13.5);
       scene.add(sil);
     }
   }
 
-  /* ── 中央全息调度枢纽 ── */
+  /* ── 中央调度器 ── */
   function buildHub() {
-    hub = new THREE.Group();
-    scene.add(hub);
+    hub = new THREE.Group(); scene.add(hub);
 
     var base = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.75, 2.05, .45, 8),
+      new THREE.CylinderGeometry(1.5, 1.8, .4, 8),
       new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: .9, roughness: .26 })
     );
-    base.position.y = .22;
-    hub.add(base);
+    base.position.y = .2; hub.add(base);
 
-    var baseRing = new THREE.Mesh(
-      new THREE.RingGeometry(1.85, 1.98, 48),
-      new THREE.MeshBasicMaterial({ color: COL.cyan, side: THREE.DoubleSide })
+    var ring = new THREE.Mesh(
+      new THREE.RingGeometry(1.6, 1.72, 48),
+      new THREE.MeshBasicMaterial({ color: C.cyan, side: THREE.DoubleSide })
     );
-    baseRing.rotation.x = -Math.PI / 2;
-    baseRing.position.y = .46;
-    hub.add(baseRing);
+    ring.rotation.x = -Math.PI / 2; ring.position.y = .42; hub.add(ring);
 
     var core = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(.95, 2),
-      new THREE.MeshBasicMaterial({ color: COL.cyan, wireframe: true, transparent: true, opacity: .72 })
+      new THREE.IcosahedronGeometry(.8, 1),
+      new THREE.MeshBasicMaterial({ color: C.cyan, wireframe: true, transparent: true, opacity: .8 })
     );
-    core.position.y = 2.1;
+    core.position.y = 1.75;
 
     var inner = new THREE.Mesh(
-      new THREE.SphereGeometry(.5, 24, 24),
+      new THREE.SphereGeometry(.4, 20, 20),
       new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
     );
-    inner.position.y = 2.1;
+    inner.position.y = 1.75;
 
-    var ring1 = new THREE.Mesh(
-      new THREE.TorusGeometry(1.3, .032, 12, 64),
-      new THREE.MeshBasicMaterial({ color: COL.green })
-    );
-    ring1.position.y = 2.1;
+    var r1 = new THREE.Mesh(new THREE.TorusGeometry(1.05, .028, 10, 56),
+      new THREE.MeshBasicMaterial({ color: C.cxl }));
+    r1.position.y = 1.75;
+    var r2 = new THREE.Mesh(new THREE.TorusGeometry(1.22, .022, 10, 56),
+      new THREE.MeshBasicMaterial({ color: C.rdma }));
+    r2.position.y = 1.75; r2.rotation.x = Math.PI / 3;
 
-    var ring2 = new THREE.Mesh(
-      new THREE.TorusGeometry(1.5, .024, 12, 64),
-      new THREE.MeshBasicMaterial({ color: COL.blue })
-    );
-    ring2.position.y = 2.1;
-    ring2.rotation.x = Math.PI / 3;
+    hub.add(core, inner, r1, r2);
+    hub.userData = { core: core, inner: inner, r1: r1, r2: r2 };
 
-    hub.add(core, inner, ring1, ring2);
-    hub.userData = { core: core, inner: inner, ring1: ring1, ring2: ring2 };
+    var halo = glowSprite(C.cyan, 5.2, .45);
+    halo.position.y = 1.75; hub.add(halo);
 
-    /* 假泛光：枢纽整体挂一枚加色光晕 */
-    var halo = glowSprite(0x38bdf8, 6.4, .5);
-    halo.position.y = 2.1;
-    hub.add(halo);
-
-    /* 地面雷达波纹 */
     radar = new THREE.Mesh(
-      new THREE.RingGeometry(2.2, 2.34, 64),
-      new THREE.MeshBasicMaterial({ color: COL.cyan, transparent: true, opacity: .55, side: THREE.DoubleSide })
+      new THREE.RingGeometry(1.9, 2.02, 64),
+      new THREE.MeshBasicMaterial({ color: C.cyan, transparent: true, opacity: .5, side: THREE.DoubleSide })
     );
-    radar.rotation.x = -Math.PI / 2;
-    radar.position.y = .02;
-    scene.add(radar);
+    radar.rotation.x = -Math.PI / 2; radar.position.y = .02; scene.add(radar);
   }
 
-  /* ── 四台重型机柜 + 顶部桥架 ── */
-  function buildRacksAndBridge() {
-    var cfg = [
-      { id: 'R1', name: 'R1 · 计算节点 A', sub: 'LLM 推理集群 · 电光蓝', pos: [-3.8, 0, 3.2], color: COL.blue, pool: false },
-      { id: 'R2', name: 'R2 · 计算节点 B', sub: 'LLM 推理集群 · 电光蓝', pos: [3.8, 0, -3.2], color: COL.blue, pool: false },
-      { id: 'R3', name: 'R3 · 迁移热点', sub: 'RDMA KV 迁移中 · 琥珀橙', pos: [-3.8, 0, -3.2], color: COL.orange, pool: false },
-      { id: 'R4', name: 'R4 · CXL MHD 池', sub: '8 TB 共享内存仓 · 翡翠绿', pos: [3.8, 0, 3.2], color: COL.green, pool: true }
-    ];
-
-    cfg.forEach(function (c) {
+  /* ── 四台机柜 ── */
+  function buildRacks() {
+    RACK_DEF.forEach(function (def) {
       var g = new THREE.Group();
-      g.position.set(c.pos[0], c.pos[1], c.pos[2]);
+      g.position.set(def.pos[0], 0, def.pos[2]);
       scene.add(g);
 
-      /* 承重底座 + 发光地脚 */
+      var accent = def.cxl ? C.cxl : C.rdma;
+
       var plinth = new THREE.Mesh(
-        new THREE.BoxGeometry(2.35, .35, 2.35),
+        new THREE.BoxGeometry(2.0, .3, 2.0),
         new THREE.MeshStandardMaterial({ color: 0x0b1220, metalness: .9, roughness: .3 })
       );
-      plinth.position.y = .175; g.add(plinth);
+      plinth.position.y = .15; g.add(plinth);
 
-      var underGlow = new THREE.Mesh(
-        new THREE.BoxGeometry(2.4, .06, 2.4),
-        new THREE.MeshBasicMaterial({ color: c.color })
-      );
-      underGlow.position.y = .04; g.add(underGlow);
+      var foot = new THREE.Mesh(new THREE.BoxGeometry(2.04, .05, 2.04),
+        new THREE.MeshBasicMaterial({ color: accent }));
+      foot.position.y = .035; g.add(foot);
 
-      /* 柜体：半透明钢化玻璃 */
-      var bodyGeo = new THREE.BoxGeometry(2.15, 4.3, 2.15);
+      var bodyGeo = new THREE.BoxGeometry(1.9, 3.9, 1.9);
       var body = new THREE.Mesh(bodyGeo, new THREE.MeshStandardMaterial({
-        color: 0x09111e, metalness: .82, roughness: .24,
-        transparent: true, opacity: c.pool ? .42 : .6
+        color: 0x0a1420, metalness: .8, roughness: .26,
+        transparent: true, opacity: def.cxl ? .64 : .76
       }));
-      body.position.y = 2.5;
-      body.userData.rackId = c.id;
+      body.position.y = 2.25;
+      body.userData.rackId = def.id;
       clickable.push(body);
       g.add(body);
 
       var edges = new THREE.LineSegments(
         new THREE.EdgesGeometry(bodyGeo),
-        new THREE.LineBasicMaterial({ color: c.color, transparent: true, opacity: .85 })
+        new THREE.LineBasicMaterial({ color: accent, transparent: true, opacity: .9 })
       );
-      edges.position.y = 2.5; g.add(edges);
+      edges.position.y = 2.25; g.add(edges);
 
-      /* 密集刀片 / 内存模组 */
-      var blades = [], layers = c.pool ? 7 : 10;
-      var bGeo = new THREE.BoxGeometry(1.78, c.pool ? .28 : .18, 1.82);
-      for (var i = 0; i < layers; i++) {
-        var m = new THREE.Mesh(bGeo, new THREE.MeshStandardMaterial({
-          color: 0x0f172a, emissive: c.color, emissiveIntensity: c.pool ? 1.3 : .95,
-          metalness: .6, roughness: .35
-        }));
-        m.position.y = .78 + i * (3.6 / layers);
-        g.add(m); blades.push(m);
-      }
+      /* 4 台 4U 服务器 */
+      var servers = [];
+      for (var s = 0; s < 4; s++) {
+        var sy = .78 + s * .78;
+        var sv = new THREE.Group();
+        sv.position.set(0, sy, 0);
 
-      var pl = new THREE.PointLight(c.color, 5.2, 11);
-      pl.position.set(0, 2.2, 0); g.add(pl);
-
-      var halo = glowSprite(c.color, 5.2, .34);
-      halo.position.set(0, 4.35, 0); g.add(halo);
-
-      racks.push({ id: c.id, group: g, blades: blades, color: c.color, pool: c.pool, phase: Math.random() * 6 });
-
-      /* 顶部标签锚点 */
-      labelDefs.push({ id: c.id, p: new THREE.Vector3(c.pos[0], 5.05, c.pos[2]), txt: c.name, sub: c.sub, color: c.color });
-    });
-
-    /* 重型跨接交换桥架 */
-    var beam = new THREE.Mesh(
-      new THREE.BoxGeometry(9.6, .36, 1.3),
-      new THREE.MeshStandardMaterial({ color: 0x111c2e, metalness: .9, roughness: .26 })
-    );
-    beam.position.set(0, 5.35, 0); scene.add(beam);
-
-    var neon = new THREE.Mesh(
-      new THREE.BoxGeometry(9.4, .06, 1.34),
-      new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
-    );
-    neon.position.set(0, 5.19, 0); scene.add(neon);
-
-    var beamGlow = glowSprite(0x38bdf8, 9.6, .22);
-    beamGlow.position.set(0, 5.2, 0); scene.add(beamGlow);
-  }
-
-  /* ── 双层法兰玻璃管道 + 流光粒子 ── */
-  function buildPipelines() {
-    var cfg = [
-      { pts: [[-3.8, .35, 2.1], [-2.2, .25, 1.6], [-1.3, .45, .8]], c: COL.blue, r: .14, sp: .012 },
-      { pts: [[3.8, .35, -2.1], [2.2, .25, -1.6], [1.3, .45, -.8]], c: COL.blue, r: .14, sp: .012 },
-      { pts: [[-3.8, .35, -2.1], [-2.2, .25, -1.6], [-1.3, .45, -.8]], c: COL.orange, r: .16, sp: .018 },
-      { pts: [[1.3, .45, .8], [2.2, .25, 1.6], [3.8, .35, 2.1]], c: COL.green, r: .18, sp: .02 },
-      { pts: [[-3.8, 4.65, 3.2], [-3.8, 5.2, .4]], c: COL.blue, r: .09, sp: .015 },
-      { pts: [[-3.8, 4.65, -3.2], [-3.8, 5.2, -.4]], c: COL.orange, r: .09, sp: .015 },
-      { pts: [[3.8, 4.65, -3.2], [3.8, 5.2, -.4]], c: COL.blue, r: .09, sp: .015 },
-      { pts: [[3.8, 4.65, 3.2], [3.8, 5.2, .4]], c: COL.green, r: .09, sp: .015 }
-    ];
-
-    cfg.forEach(function (c) {
-      var curve = new THREE.CatmullRomCurve3(c.pts.map(function (p) {
-        return new THREE.Vector3(p[0], p[1], p[2]);
-      }));
-
-      var outer = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, 40, c.r, 14, false),
-        new THREE.MeshStandardMaterial({
-          color: c.c, metalness: .1, roughness: .12,
-          transparent: true, opacity: .26, side: THREE.DoubleSide,
-          emissive: c.c, emissiveIntensity: .25
-        })
-      );
-      scene.add(outer);
-
-      var core = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, 40, c.r * .46, 10, false),
-        new THREE.MeshBasicMaterial({ color: c.c })
-      );
-      scene.add(core);
-
-      /* 法兰接头 */
-      [0, .5, 1].forEach(function (t) {
-        var pos = curve.getPointAt(t);
-        var fl = new THREE.Mesh(
-          new THREE.CylinderGeometry(c.r * 1.5, c.r * 1.5, .18, 14),
-          new THREE.MeshStandardMaterial({ color: 0x334155, metalness: .9, roughness: .26 })
+        var chassis = new THREE.Mesh(
+          new THREE.BoxGeometry(1.6, .62, 1.5),
+          new THREE.MeshStandardMaterial({ color: 0x101c2a, metalness: .78, roughness: .34 })
         );
-        fl.position.copy(pos);
-        fl.rotation.x = Math.PI / 2;
-        scene.add(fl);
-      });
+        sv.add(chassis);
 
-      /* 管口光晕 */
-      [0, 1].forEach(function (t) {
-        var s = glowSprite(c.c, c.r * 7, .5);
-        s.position.copy(curve.getPointAt(t));
-        scene.add(s);
-      });
+        for (var b = 0; b < 6; b++) {
+          var bay = new THREE.Mesh(
+            new THREE.BoxGeometry(.2, .34, .03),
+            new THREE.MeshStandardMaterial({ color: 0x16283a, metalness: .6, roughness: .5 })
+          );
+          bay.position.set(-.62 + b * .25, 0, .74);
+          sv.add(bay);
+        }
 
-      /* 高速流光粒子 */
-      var parts = [], pGeo = new THREE.SphereGeometry(c.r * .62, 8, 8);
-      var pMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-      for (var i = 0; i < 8; i++) {
-        var m = new THREE.Mesh(pGeo, pMat);
-        scene.add(m);
-        parts.push({ mesh: m, t: i / 8 });
+        var led = new THREE.Mesh(new THREE.BoxGeometry(.5, .035, .03),
+          new THREE.MeshBasicMaterial({ color: accent }));
+        led.position.set(.48, .22, .74);
+        sv.add(led);
+
+        g.add(sv);
+        servers.push({ group: sv, led: led });
       }
-      pipelines.push({ curve: curve, particles: parts, speed: c.sp });
+
+      /* CXL 器件 */
+      if (def.cxl) {
+        var swY = .78 + 4 * .78 + .12;
+        var sw = new THREE.Mesh(
+          new THREE.BoxGeometry(1.55, .3, .9),
+          new THREE.MeshStandardMaterial({ color: 0x123035, metalness: .7, roughness: .34,
+            emissive: C.cxl, emissiveIntensity: .35 })
+        );
+        sw.position.set(0, swY, -.1); g.add(sw);
+
+        var mhd = new THREE.Mesh(
+          new THREE.BoxGeometry(1.55, .34, 1.1),
+          new THREE.MeshStandardMaterial({ color: 0x0e2a28, metalness: .6, roughness: .3,
+            emissive: C.cxl, emissiveIntensity: .45 })
+        );
+        mhd.position.set(0, swY + .48, -.1); g.add(mhd);
+
+        var mhdGlow = glowSprite(C.cxl, 2.2, .38);
+        mhdGlow.position.set(0, swY + .48, .4); g.add(mhdGlow);
+      }
+
+      var pl = new THREE.PointLight(accent, 3.6, 9);
+      pl.position.set(0, 2.0, .6); g.add(pl);
+
+      racks.push({ id: def.id, cxl: def.cxl, group: g, servers: servers, accent: accent,
+        phase: Math.random() * 6 });
+      rackMap[def.id] = g;
+
+      labelDefs.push({
+        id: def.id,
+        p: new THREE.Vector3(def.pos[0], 4.35, def.pos[2]),
+        title: def.id + (def.cxl ? ' · CXL + RDMA' : ' · RDMA ONLY'),
+        sub: def.cxl ? '4× GPU 服务器 + CXL Switch + 共享 MHD' : '4× GPU 服务器 · 无 CXL 器件',
+        color: accent
+      });
     });
   }
 
-  /* ── DOM 标签 ── */
+  /* ── 控制面 ── */
+  function buildControlLinks() {
+    RACK_DEF.forEach(function (def) {
+      var from = new THREE.Vector3(0, 1.9, 0);
+      var to = new THREE.Vector3(def.pos[0] * .62, 4.1, def.pos[2] * .62);
+      var curve = new THREE.CatmullRomCurve3([
+        from,
+        new THREE.Vector3(from.x + (to.x - from.x) * .5, 3.4, 0),
+        to
+      ]);
+      var tube = new THREE.Mesh(
+        new THREE.TubeGeometry(curve, 24, .022, 8, false),
+        new THREE.MeshBasicMaterial({ color: C.ctl, transparent: true, opacity: .45 })
+      );
+      ctlGroup.add(tube);
+    });
+  }
+
+  /* ── 数据流 ── */
+  function clearFlows() {
+    while (flowGroup.children.length) {
+      var c = flowGroup.children.pop();
+      c.traverse(function (o) {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) o.material.dispose();
+      });
+    }
+  }
+
+  function tube(points, color, radius, opacity) {
+    var curve = new THREE.CatmullRomCurve3(points.map(function (p) {
+      return new THREE.Vector3(p[0], p[1], p[2]);
+    }));
+    var group = new THREE.Group();
+
+    var outer = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 36, radius, 12, false),
+      new THREE.MeshStandardMaterial({
+        color: color, metalness: .1, roughness: .14, transparent: true,
+        opacity: opacity == null ? .3 : opacity, emissive: color, emissiveIntensity: .3,
+        side: THREE.DoubleSide
+      })
+    );
+    var core = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 36, radius * .45, 8, false),
+      new THREE.MeshBasicMaterial({ color: color })
+    );
+    group.add(outer, core);
+
+    [0, 1].forEach(function (t) {
+      var fl = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius * 1.5, radius * 1.5, .14, 12),
+        new THREE.MeshStandardMaterial({ color: 0x334155, metalness: .9, roughness: .28 })
+      );
+      fl.position.copy(curve.getPointAt(t));
+      group.add(fl);
+    });
+
+    var parts = [], pGeo = new THREE.SphereGeometry(radius * .6, 8, 8);
+    var pMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    for (var i = 0; i < 6; i++) {
+      var m = new THREE.Mesh(pGeo, pMat);
+      group.add(m);
+      parts.push({ mesh: m, t: i / 6 });
+    }
+
+    group.userData.flow = { curve: curve, particles: parts, speed: .012 + radius * .03 };
+    flowGroup.add(group);
+    return group;
+  }
+
+  function rackPt(id, kind) {
+    var g = rackMap[id];
+    if (!g) return new THREE.Vector3();
+    var p = g.position;
+    if (kind === 'mhd') return new THREE.Vector3(p.x, 4.1, p.z + .3);
+    return new THREE.Vector3(p.x, 1.3, p.z + .55);
+  }
+
+  function applyScenario(id, silent) {
+    scenario = SCEN[id] ? id : 'S1';
+    clearFlows();
+
+    var R1 = rackPt('R1'), R2 = rackPt('R2'), R3 = rackPt('R3'), R4 = rackPt('R4');
+
+    if (scenario === 'S1') {
+      tube([[R1.x, 1.5, R1.z + .72], [R1.x, 2.7, R1.z + .56], [R1.x, 3.95, R1.z + .35]], C.cxl, .1);
+    } else if (scenario === 'S2') {
+      tube([[R2.x, .55, R2.z - .7], [R2.x, .3, 1.2], [0, .3, .35], [R4.x, .3, -1.2], [R4.x, .55, R4.z + .7]], C.rdma, .12);
+    } else if (scenario === 'S3') {
+      tube([[R2.x, .6, R2.z - .6], [R2.x, .32, .6], [R1.x, .32, .6], [R1.x, 1.3, R1.z + .5], [R1.x, 3.6, R1.z + .35]], C.move, .11);
+      tube([[R4.x, .6, R4.z + .6], [R4.x, .32, -.6], [R3.x, .32, -.6], [R3.x, 1.3, R3.z + .5], [R3.x, 3.6, R3.z + .35]], C.move, .11);
+    } else {
+      tube([[R1.x, 3.95, R1.z + .3], [R1.x, 4.7, 0], [R2.x, 4.7, 0], [R2.x, 3.6, R2.z + .3]], C.copy, .1);
+      tube([[R3.x, 3.95, R3.z + .3], [R3.x, 4.7, 0], [R4.x, 4.7, 0], [R4.x, 3.6, R4.z + .3]], C.copy, .1);
+      tube([[R1.x, 4.2, R1.z], [0, 4.9, 0], [R3.x, 4.2, R3.z]], C.copy, .08);
+    }
+
+    var act = SCEN[scenario].racks;
+    racks.forEach(function (r) {
+      var on = act.indexOf(r.id) >= 0;
+      r.group.traverse(function (o) {
+        if (o.isPointLight) o.intensity = on ? 4.4 : 1.3;
+      });
+      r.servers.forEach(function (s) {
+        s.led.material.opacity = on ? 1 : .45;
+        s.led.material.transparent = true;
+      });
+    });
+
+    if (!silent) updateUI();
+  }
+
+  /* ── 标签 ── */
   function ensureLabels() {
     if (labelLayer || !host) return;
     labelLayer = document.createElement('div');
@@ -360,12 +431,11 @@ window.HEAVY_CLUSTER = (function () {
       var el = document.createElement('div');
       el.className = 'hv-lbl';
       el.style.borderColor = '#' + ('000000' + d.color.toString(16)).slice(-6);
-      el.innerHTML = '<b>' + d.txt + '</b><i>' + d.sub + '</i>';
+      el.innerHTML = '<b>' + d.title + '</b><i>' + d.sub + '</i>';
       labelLayer.appendChild(el);
       labelEls.push(el);
     });
   }
-
   var _v = new THREE.Vector3();
   function updateLabels() {
     if (!labelLayer || !labelEls.length || !host) return;
@@ -380,18 +450,79 @@ window.HEAVY_CLUSTER = (function () {
     });
   }
 
+  /* ── 舞台 UI ── */
+  function buildUI() {
+    var wrap = document.createElement('div');
+    wrap.className = 'hv-ui';
+
+    var tabs = document.createElement('div');
+    tabs.className = 'hv-tabs';
+    Object.keys(SCEN).forEach(function (k) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'hv-tab' + (k === scenario ? ' is-on' : '');
+      b.setAttribute('data-scen', k);
+      b.innerHTML = '<b>' + k + '</b><span>' + SCEN[k].tag + '</span>';
+      b.addEventListener('click', function () { applyScenario(k); });
+      tabs.appendChild(b);
+    });
+    wrap.appendChild(tabs);
+
+    var cap = document.createElement('div');
+    cap.className = 'hv-cap';
+    wrap.appendChild(cap);
+
+    var card = document.createElement('div');
+    card.className = 'hv-card';
+    card.innerHTML = '<div class="hv-card-h"><b id="hv-card-id">R1</b><span id="hv-card-tag">CXL + RDMA</span></div>' +
+      '<ul id="hv-card-list"></ul>' +
+      '<button type="button" class="hv-jump" id="hv-jump">打开 03 机架解剖 →</button>';
+    wrap.appendChild(card);
+
+    host.appendChild(wrap);
+    ui.wrap = wrap; ui.cap = cap; ui.card = card;
+    ui.cardId = card.querySelector('#hv-card-id');
+    ui.cardTag = card.querySelector('#hv-card-tag');
+    ui.cardList = card.querySelector('#hv-card-list');
+    card.querySelector('#hv-jump').addEventListener('click', function () {
+      if (selected && onJumpCb) onJumpCb(selected);
+    });
+    updateUI();
+  }
+
+  function updateUI() {
+    if (!ui.cap) return;
+    var s = SCEN[scenario];
+    ui.cap.innerHTML = '<b>S' + (Object.keys(SCEN).indexOf(scenario) + 1) + ' · ' + s.tag + '</b><span>' + s.desc + '</span>';
+    ui.wrap.querySelectorAll('.hv-tab').forEach(function (b) {
+      b.classList.toggle('is-on', b.getAttribute('data-scen') === scenario);
+    });
+  }
+
+  function showCard(id) {
+    selected = id;
+    var r = racks.filter(function (x) { return x.id === id; })[0];
+    if (!r || !ui.card) return;
+    ui.cardId.textContent = id;
+    ui.cardTag.textContent = r.cxl ? 'CXL + RDMA · 增量部署' : 'RDMA ONLY · 存量机架';
+    ui.cardTag.style.color = r.cxl ? '#53e3c4' : '#5f9fe8';
+    var rows = r.cxl
+      ? ['4 × GPU 服务器（4U）', '1 × CXL Switch（2 主机口）', '1 × 共享 MHD（池化内存）', '上行 RDMA 400G ×2']
+      : ['4 × GPU 服务器（4U）', '本地 DRAM 池（RDMA 共享）', '无 CXL 器件', '上行 RDMA 400G ×2'];
+    ui.cardList.innerHTML = rows.map(function (t) { return '<li>' + t + '</li>'; }).join('');
+    ui.card.classList.add('is-on');
+  }
+
   /* ── 交互 ── */
   function wireEvents() {
     var dom = renderer.domElement;
-    dom.addEventListener('click', function (e) {
+    dom.addEventListener('pointerdown', function (e) {
       var rect = dom.getBoundingClientRect();
       pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
       var hits = raycaster.intersectObjects(clickable, false);
-      if (hits.length && hits[0].object.userData.rackId && onRackCb) {
-        onRackCb(hits[0].object.userData.rackId);
-      }
+      if (hits.length && hits[0].object.userData.rackId) showCard(hits[0].object.userData.rackId);
     });
     window.addEventListener('resize', resize);
   }
@@ -405,40 +536,42 @@ window.HEAVY_CLUSTER = (function () {
     camera.updateProjectionMatrix();
   }
 
-  /* ── 渲染循环 ── */
+  /* ── 循环 ── */
   function animate() {
     if (!running) return;
     rafId = requestAnimationFrame(animate);
-    var dt = Math.min(.05, clock.getDelta());
+    clock.getDelta();
     var t = clock.elapsedTime;
 
-    var hd = hub && hub.userData;
-    if (hd) {
-      hd.core.rotation.y = t * .65;
-      hd.inner.scale.setScalar(1 + Math.sin(t * 3.5) * .08);
-      hd.ring1.rotation.z = t * .9;
-      hd.ring2.rotation.y = -t * .7;
+    if (hub && hub.userData) {
+      hub.userData.core.rotation.y = t * .6;
+      hub.userData.inner.scale.setScalar(1 + Math.sin(t * 3.2) * .07);
+      hub.userData.r1.rotation.z = t * .85;
+      hub.userData.r2.rotation.y = -t * .65;
     }
     if (radar) {
-      var k = (t * .35) % 1;
-      radar.scale.setScalar(1 + k * 3.2);
-      radar.material.opacity = .5 * (1 - k);
+      var k = (t * .32) % 1;
+      radar.scale.setScalar(1 + k * 3.0);
+      radar.material.opacity = .45 * (1 - k);
     }
 
+    var act = SCEN[scenario].racks;
     racks.forEach(function (r) {
-      var freq = r.color === COL.orange ? 7.5 : 3.2;
-      for (var i = 0; i < r.blades.length; i++) {
-        var p = Math.sin(t * freq + i * .65 + r.phase);
-        r.blades[i].material.emissiveIntensity = (r.pool ? 1.2 : .85) + p * .4;
+      var on = act.indexOf(r.id) >= 0;
+      for (var i = 0; i < r.servers.length; i++) {
+        var p = Math.sin(t * (on ? 3.4 : 1.2) + i * .8 + r.phase);
+        r.servers[i].led.scale.y = .5 + .5 * (p * .5 + .5);
+        r.servers[i].led.material.color.setHex(r.accent);
       }
     });
 
-    pipelines.forEach(function (pipe) {
-      for (var i = 0; i < pipe.particles.length; i++) {
-        var pt = pipe.particles[i];
-        pt.t = (pt.t + pipe.speed) % 1;
-        pt.mesh.position.copy(pipe.curve.getPointAt(pt.t));
-      }
+    flowGroup.children.forEach(function (g) {
+      var f = g.userData.flow;
+      if (!f) return;
+      f.particles.forEach(function (p) {
+        p.t = (p.t + f.speed) % 1;
+        p.mesh.position.copy(f.curve.getPointAt(p.t));
+      });
     });
 
     controls.update();
@@ -448,42 +581,25 @@ window.HEAVY_CLUSTER = (function () {
 
   /* ── 对外 ── */
   function mount(el, opts) {
-    if (!THREE) return false;
     host = el;
-    onRackCb = (opts && opts.onRack) || onRackCb;
+    onJumpCb = (opts && opts.onJump) || onJumpCb;
     init();
     resize();
-    ensureLabels();
     if (labelLayer) labelLayer.style.display = '';
+    if (ui.wrap) ui.wrap.style.display = '';
     if (!running) { running = true; clock.start(); animate(); }
     return true;
   }
-
   function unmount() {
     running = false;
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     if (labelLayer) labelLayer.style.display = 'none';
+    if (ui.wrap) ui.wrap.style.display = 'none';
   }
-
-  function setView(name) {
-    if (!camera || !controls) return;
-    var P = {
-      iso: [[15.0, 15.5, 17.0], [0, 1.9, 0]],
-      front: [[0, 7.0, 22], [0, 2.0, 0]],
-      low: [[16.0, 3.4, 18.0], [0, 1.6, 0]],
-      top: [[0.1, 18, 0.1], [0, 1.2, 0]]
-    }[name] || [[11.5, 7.6, 13.5], [0, 1.8, 0]];
-    camera.position.set(P[0][0], P[0][1], P[0][2]);
-    controls.target.set(P[1][0], P[1][1], P[1][2]);
-    controls.update();
-  }
+  function setScenario(id) { if (SCEN[id]) applyScenario(id); }
 
   return {
-    available: true,
-    mount: mount,
-    unmount: unmount,
-    resize: resize,
-    setView: setView,
-    isRunning: function () { return running; }
+    available: true, mount: mount, unmount: unmount, resize: resize,
+    setScenario: setScenario, isRunning: function () { return running; }
   };
 })();
