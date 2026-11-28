@@ -1,15 +1,15 @@
 .hl-ui{position:absolute;inset:0;pointer-events:none;font-family:var(--cn);color:#e7edf2}
-.hl-labhead{position:absolute;top:14px;left:18px;display:flex;align-items:flex-start;gap:10px;pointer-events:auto;filter:drop-shadow(0 5px 12px #0005)}
+.hl-labhead{position:absolute;top:12px;left:18px;right:18px;display:flex;align-items:flex-start;gap:10px;pointer-events:auto;filter:drop-shadow(0 5px 12px #0005);z-index:20}
 .hl-labhead span{font:10px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.16em;color:#8fb9b2;padding-top:3px}.hl-labhead strong{font-size:17px;font-weight:600;letter-spacing:.04em;color:#f0f5f4}
 .hl-mode{display:flex;gap:4px;margin-left:12px}.hl-mode button{padding:4px 8px!important;font-size:11px!important;border-radius:3px!important;background:#101a22d9!important}.hl-mode button.active,.hl-mode button:hover{background:#28534f!important;border-color:#8abdb2!important}
 .hl-treepanel{position:absolute;left:18px;top:142px;width:190px;padding:12px 10px;background:#0d171ee8;border:1px solid #455a64;border-left:2px solid #82b7ad;border-radius:4px;pointer-events:auto;box-shadow:0 12px 28px #0005}.hl-tree-title{font:11px ui-monospace,Consolas,monospace;letter-spacing:.13em;color:#dce8e6}.hl-treepanel small{display:block;color:#8fa3ad;font-size:11px;margin:6px 0 9px}.hl-tree-list{display:flex;flex-direction:column;gap:3px}.hl-tree-row{width:100%;text-align:left!important;padding:7px 6px!important;border:0!important;border-left:2px solid transparent!important;background:transparent!important;color:#b9c7cd!important;font-size:12px!important;border-radius:0!important}.hl-tree-row:hover,.hl-tree-row.selected{color:#f0f8f6!important;background:#29464b!important;border-left-color:#90c9bd!important}.hl-tree-mhd{color:#8ec2b6!important}
-.hl-toolbar{position:absolute;top:52px;left:16px;right:16px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:auto}
-.hl-path{position:absolute;top:104px;left:18px;padding:7px 10px;background:#101923df;border-left:2px solid #80b9a2;color:#c9d5dc;font-size:13px;letter-spacing:.03em}
+.hl-toolbar{position:absolute;top:62px;left:16px;right:16px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:auto;z-index:19}
+.hl-path{position:absolute;top:112px;left:18px;padding:7px 10px;background:#101923f2;border-left:2px solid #80b9a2;color:#c9d5dc;font-size:13px;letter-spacing:.03em;z-index:18}
 .hl-ui button{border:1px solid #526575;background:#18232e;color:#eef4fa;border-radius:5px;padding:8px 12px;font:inherit;font-size:14px;cursor:pointer}
 .hl-ui button:hover,.hl-ui button.active{background:#294851;border-color:#81b9b0}
 .hl-ui button:focus-visible{outline:2px solid #c6e8fd;outline-offset:3px}
 .hl-caption{position:absolute;bottom:20px;left:20px;right:20px;font-size:14px;color:#b4c4cf;line-height:1.6;background:#101923df;padding:10px 14px;border-left:2px solid #87b8b0}
-.hl-card{position:absolute;right:16px;top:108px;width:min(300px,44%);padding:18px;background:#101923f2;border:1px solid #4c606f;border-radius:8px;pointer-events:auto;max-height:calc(100% - 200px);overflow:auto;box-shadow:0 8px 30px #0006}
+.hl-card{position:absolute;right:16px;top:112px;width:min(300px,44%);padding:18px;background:#101923f2;border:1px solid #4c606f;border-radius:8px;pointer-events:auto;max-height:calc(100% - 200px);overflow:auto;box-shadow:0 8px 30px #0006;z-index:21}
 .hl-card[hidden]{display:none}.hl-card h2{font-size:19px;margin:10px 0}.hl-card p{font-size:14px;line-height:1.75;color:#c6d1dc}.hl-card small{font-size:12px;color:#8bb8b0}.hl-card button{margin:4px 5px 4px 0}.hl-card .hl-close{float:right;padding:3px 8px}
 .hl-label{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;pointer-events:auto!important;font-size:13px!important;padding:5px 8px!important;background:#111b26e6!important}
 .hl-parts{position:absolute;left:16px;top:110px;display:flex;flex-direction:column;gap:5px;pointer-events:auto;max-height:60%;overflow:auto}.hl-parts:empty{display:none}
@@ -24,8 +24,8 @@
 #app.hl-focus[data-page="rack"]{grid-template-columns:1fr;grid-template-rows:var(--topbar) 1fr}
 #app.hl-focus[data-page="rack"] .side,#app.hl-focus[data-page="rack"] .console{display:none}
 #app.hl-focus[data-page="rack"] .stage{grid-column:1;grid-row:2}
-#app.hl-focus[data-page="rack"] .hl-toolbar{top:16px}
-#app.hl-focus[data-page="rack"] .hl-path{top:66px}
+#app.hl-focus[data-page="rack"] .hl-toolbar{top:62px}
+#app.hl-focus[data-page="rack"] .hl-path{top:112px}
 
 /* The immersive lab owns the stage on pages 02/03. Keep the legacy topology
    controls and bottom console from sitting underneath the WebGL workspace. */
@@ -47,6 +47,6 @@
  .app[data-page="rack"] .brand,.app[data-page="overview"] .brand,.app[data-page="rack"] .top-actions,.app[data-page="overview"] .top-actions{display:none}
  .app[data-page="rack"] .pages,.app[data-page="overview"] .pages{display:flex;width:max-content;padding:10px}
  .app.hl-config-open[data-page="rack"] .left,.app.hl-config-open[data-page="overview"] .left{display:flex;position:absolute;left:0;top:170px;bottom:10px;width:280px;z-index:8;background:#101923}
- .hl-toolbar{top:16px;left:8px;right:8px}.hl-card{top:100px;width:calc(100% - 32px);max-height:38%}.hl-parts{top:100px;max-height:43%}.hl-parts button{font-size:12px}
+ .hl-toolbar{top:62px;left:8px;right:8px}.hl-path{top:112px;left:8px}.hl-card{top:112px;width:calc(100% - 32px);max-height:38%}.hl-parts{top:112px;max-height:43%}.hl-parts button{font-size:12px}
  .hl-caption{bottom:8px;left:8px;right:8px}.app[data-page="rack"] .stage-top,.app[data-page="overview"] .stage-top{display:none}
 }
