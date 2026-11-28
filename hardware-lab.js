@@ -304,7 +304,7 @@ View.prototype.layout = function () {
 };
 View.prototype.inspect=function(item){
  if(this.overview){this.stopDeploymentDemo();this.jump(item.rack.id);return;}
- this.selected=item;this.items.forEach(i=>i.target=i===item?1:0);item.dest.set(0,1.05,1.5);
+  this.selected=item;this.ui.classList.add('hl-dissection');this.items.forEach(i=>i.target=i===item?1:0);item.dest.set(0,1.05,1.5);
  this.path.textContent=`机房  /  ${this.rid}  /  ${item.id}  /  器件解剖`;
  this.camTo=new T.Vector3(1.1,2.05,3.1);this.lookTo=new T.Vector3(0,1.22,1.5);
   this.parts.replaceChildren();this.button(this.parts,'返回整柜',()=>this.exitDissect());
@@ -334,6 +334,7 @@ View.prototype.describeDevice = function (item) {
 };
 View.prototype.exitDissect = function () {
  this.selected = null;
+  this.ui.classList.remove('hl-dissection');
   this.timeline = null;
  this.parts.replaceChildren();
  this.closeDetails();
