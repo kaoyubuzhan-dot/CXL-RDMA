@@ -39,6 +39,8 @@ function View(host,overview){
  this.bar=document.createElement('div');this.bar.className='hl-toolbar';this.ui.appendChild(this.bar);
  this.path=document.createElement('div');this.path.className='hl-path';this.ui.appendChild(this.path);
  this.parts=document.createElement('div');this.parts.className='hl-parts';this.ui.appendChild(this.parts);
+ this.labHead=document.createElement('div');this.labHead.className='hl-labhead';this.ui.appendChild(this.labHead);
+ this.treePanel=document.createElement('div');this.treePanel.className='hl-treepanel';this.ui.appendChild(this.treePanel);
  this.card=document.createElement('section');this.card.className='hl-card';this.card.hidden=true;this.ui.appendChild(this.card);
  this.caption=document.createElement('div');this.caption.className='hl-caption';this.ui.appendChild(this.caption);
  this.ray=new T.Raycaster();let down;
@@ -48,6 +50,22 @@ function View(host,overview){
  this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(host);this.toolbar();this.home();
 }
 View.prototype.button=function(parent,label,fn){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=fn;parent.appendChild(b);return b;};
+View.prototype.labChrome=function(){
+ this.labHead.replaceChildren();
+ const kicker=document.createElement('span');kicker.textContent=this.overview?'CXL–RDMA DIGITAL TWIN':'RACK ANATOMY / HARDWARE LAB';
+ const title=document.createElement('strong');title.textContent=this.overview?'集群总览 · 机房数字孪生':'机架解剖 · 42U 工程视图';
+ const mode=document.createElement('div');mode.className='hl-mode';
+ const anatomy=this.button(mode,'01 装配解剖',()=>{if(!this.overview){this.expanded=false;this.selected=null;this.parts.replaceChildren();this.closeDetails();this.layout();this.home();}});anatomy.classList.add('active');
+ this.button(mode,'02 资源实验',()=>{this.caption.textContent='资源实验状态由统一实验模型驱动；此处仅查看，不修改实验结果。';});
+ this.labHead.append(kicker,title,mode);
+ this.treePanel.replaceChildren();
+ const treeTitle=document.createElement('div');treeTitle.className='hl-tree-title';treeTitle.textContent=`ASSEMBLY TREE / ${this.overview?this.snapshot.racks.length:this.snapshot.racks[0].nodes.length+(this.snapshot.racks[0].units.length?1:0)}`;this.treePanel.append(treeTitle);
+ const hint=document.createElement('small');hint.textContent=this.overview?'选择机架进入技术档案':'选择服务器或 MHD 查看技术档案';this.treePanel.append(hint);
+ const list=document.createElement('div');list.className='hl-tree-list';this.treePanel.append(list);
+ const rack=this.snapshot.racks.find(r=>r.id===this.rid);
+ if(this.overview)this.snapshot.racks.forEach(r=>{const b=this.button(list,`${r.deployed?'●':'○'}  ${r.id}  ·  ${r.units.length?'CXL + RDMA':'RDMA ONLY'}`,()=>{this.rid=r.id;this.jump(r.id);});b.className='hl-tree-row';b.classList.toggle('selected',r.id===this.rid);});
+ else {rack.nodes.forEach(node=>{const b=this.button(list,`▣  ${node.deviceId}`,()=>{const item=this.items.find(i=>i.id===node.deviceId);if(item)this.inspect(item);});b.className='hl-tree-row';});rack.units.forEach(unit=>{const b=this.button(list,`◈  ${unit.id}  ·  ${unit.capacityGB} GB`,()=>{const item=this.items.find(i=>i.id===unit.id);if(item)this.inspect(item);});b.className='hl-tree-row hl-tree-mhd';});}
+};
 View.prototype.toolbar=function(){this.bar.replaceChildren();this.button(this.bar,'沉浸模式',()=>document.getElementById('app').classList.toggle('hl-focus'));this.button(this.bar,'配置面板',()=>document.getElementById('app').classList.toggle('hl-config-open'));this.button(this.bar,'复位视角',()=>this.home());if(!this.overview){this.button(this.bar,'机房总览',()=>{S.STATE.page='overview';S.STATE.view3d=true;window.__APP__.render();});this.button(this.bar,this.expanded?'收拢机柜':'整柜展开',()=>{this.expanded=!this.expanded;this.selected=null;this.parts.replaceChildren();this.card.hidden=true;this.layout();this.home();this.toolbar();});['R1','R2','R3','R4'].forEach(id=>{const b=this.button(this.bar,id,()=>{S.STATE.selectedRack=id;window.__APP__.render();});b.classList.toggle('active',id===this.rid);});}else {this.button(this.bar,'部署过程',()=>this.runDeploymentDemo());this.button(this.bar,'查看所选机架',()=>this.jump(this.rid));}};
 View.prototype.runDeploymentDemo = function () {
  const targets = this.snapshot.racks.filter(rack => rack.units.length).map(rack => rack.id);
@@ -242,7 +260,7 @@ View.prototype.build=function(){
    this.wire(this.root,[[2.7,.8,-1.4],[2.7,2.5,-1.4],[sx,2.5,-2.25],[sx,2.3,-2.25]],0x678eae);
  }
  this.syncRackLabels();
- this.layout();this.toolbar();
+ this.layout();this.toolbar();this.labChrome();
 };
 View.prototype.visibleRacks = function () {
  return this.overview ? this.snapshot.racks : this.snapshot.racks.filter(rack => rack.id === this.rid);
