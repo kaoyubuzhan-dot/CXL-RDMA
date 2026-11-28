@@ -147,7 +147,7 @@ View.prototype.device=function(parent,id,y,kind,nd,unit,rack){
  for(let i=0;i<8;i++){this.box(g,.043,h*.62,.012,-.179+i*.051,0,.397,0x11171e,choose);this.box(g,.03,.008,.009,-.179+i*.051,-h*.2,.407,0x687781);for(let j=0;j<3;j++)this.box(g,.03,.002,.004,-.179+i*.051,.01+j*.012,.406,0x46525b);}
  this.box(g,.008,.008,.008,.205,.025,.407,0x7bbf9c);
  this.box(g,.41,.008,.66,0,-h*.32,0,0x184c43,choose);
- const part=(key,x,z,w,d,color)=>{const pg=new T.Group();g.add(pg);pg.position.set(x,-h*.15,z);this.box(pg,w,.024,d,0,0,0,color,()=>{if(this.selected!==item)this.inspect(item);this.info(key);});const p={key,g:pg,base:pg.position.clone()};item.parts.push(p);return pg;};
+  const part=(key,x,z,w,d,color)=>{const pg=new T.Group();g.add(pg);pg.position.set(x,-h*.15,z);this.box(pg,w,.024,d,0,0,0,color,()=>{if(this.selected!==item)this.inspect(item);this.info(key);});const slot=item.parts.length;const p={key,g:pg,base:pg.position.clone(),explode:new T.Vector3((x||0)*1.55+((slot%2)?.06:-.06),.07+Math.floor(slot/3)*.025,(z||0)*1.35+((slot%3)-1)*.055)};item.parts.push(p);return pg;};
  if(kind==='server'){
   const cpu=part('CPU',-.1,-.18,.07,.07,0x8c969b);for(let i=0;i<8;i++)this.box(cpu,.06,.027,.003,0,.02,-.026+i*.007,0xc0c6c9);
   for(let i=0;i<6;i++){const dimm=part('DRAM',.025+i*.027,-.18,.012,.12,0x397f65);for(let j=0;j<4;j++)this.box(dimm,.014,.012,.018,0,.02,-.043+j*.028,0x151c22);}
@@ -307,7 +307,12 @@ View.prototype.inspect=function(item){
  this.selected=item;this.items.forEach(i=>i.target=i===item?1:0);item.dest.set(0,1.05,1.5);
  this.path.textContent=`机房  /  ${this.rid}  /  ${item.id}  /  器件解剖`;
  this.camTo=new T.Vector3(1.1,2.05,3.1);this.lookTo=new T.Vector3(0,1.22,1.5);
- this.parts.replaceChildren();this.button(this.parts,'返回整柜',()=>this.exitDissect());
+  this.parts.replaceChildren();this.button(this.parts,'返回整柜',()=>this.exitDissect());
+  const modes=document.createElement('div');modes.className='hl-dissection-modes';const modeTitle=document.createElement('small');modeTitle.textContent='DISPLAY MODE / 显示方式';modes.append(modeTitle);
+  const setMode=(label,value)=>{const b=this.button(modes,label,()=>{item.target=value;this.timeline.value=String(Math.round(value*100));});b.className='hl-mode-btn';};
+  setMode('透明壳',.22);setMode('整机',0);setMode('拆解',1);this.parts.append(modes);
+  const timeline=document.createElement('div');timeline.className='hl-dissection-timeline';const tl=document.createElement('small');tl.textContent='DISASSEMBLY TIMELINE / 拆解时间轴';timeline.append(tl);
+  this.timeline=document.createElement('input');this.timeline.type='range';this.timeline.min='0';this.timeline.max='100';this.timeline.value=String(Math.round(item.open*100));this.timeline.oninput=()=>{item.target=Number(this.timeline.value)/100;};timeline.append(this.timeline);this.parts.append(timeline);
  [...new Set(item.parts.map(p=>p.key))].forEach(k=>this.button(this.parts,INFO[k][0],()=>this.info(k)));
  this.refreshDetails = () => this.describeDevice(item);
  this.refreshDetails();
@@ -329,6 +334,7 @@ View.prototype.describeDevice = function (item) {
 };
 View.prototype.exitDissect = function () {
  this.selected = null;
+  this.timeline = null;
  this.parts.replaceChildren();
  this.closeDetails();
  this.layout();
@@ -363,7 +369,7 @@ View.prototype.resize=function(){const w=this.host.clientWidth,h=this.host.clien
 View.prototype.show=function(on){if(this.running===on)return;this.running=on;if(on){this.resize();this.last=performance.now();this.frame();}else{cancelAnimationFrame(this.raf);this.raf=null;this.stopDeploymentDemo();}};
 View.prototype.frame=function(){if(!this.running)return;this.raf=requestAnimationFrame(()=>this.frame());const now=performance.now(),dt=Math.min(.1,(now-this.last)/1000);this.last=now;const a=1-Math.exp(-dt*9);
  if(this.camTo){this.camera.position.lerp(this.camTo,a);this.controls.target.lerp(this.lookTo,a);if(this.camera.position.distanceTo(this.camTo)<.002)this.camTo=null;}
- this.items.forEach(item=>{item.g.position.lerp(item.dest,a);item.open+=(item.target-item.open)*a;item.lid.position.y=(item.kind==='server'?.0875:.0435)+item.open*.38;item.lid.position.x=item.open*-.3;item.lid.material.transparent=true;item.lid.material.opacity=1-item.open*.8;item.parts.forEach((p,i)=>{p.g.position.copy(p.base);p.g.position.y+=item.open*(.04+(i%3)*.035);});});
+  this.items.forEach(item=>{item.g.position.lerp(item.dest,a);item.open+=(item.target-item.open)*a;item.lid.position.y=(item.kind==='server'?.0875:.0435)+item.open*.38;item.lid.position.x=item.open*-.3;item.lid.material.transparent=true;item.lid.material.opacity=1-item.open*.8;item.parts.forEach(p=>{p.g.position.copy(p.base).addScaledVector(p.explode,item.open);});if(this.selected===item&&this.timeline)this.timeline.value=String(Math.round(item.open*100));});
  this.controls.update();this.renderer.render(this.scene,this.camera);const w=this.host.clientWidth,h=this.host.clientHeight;this.labels.forEach(l=>{l.parent.updateWorldMatrix(true,false);const p=l.parent.localToWorld(l.offset.clone()).project(this.camera);l.el.style.display=p.z>1||p.z< -1||this.selected?'none':'';l.el.style.left=(p.x+1)*w/2+'px';l.el.style.top=(1-p.y)*h/2+'px';});
 };
 let rackView,overviewView;
