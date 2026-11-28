@@ -91,6 +91,26 @@ View.prototype.mat=function(c,metal=.3,rough=.6){return new T.MeshStandardMateri
 View.prototype.box=function(parent,w,h,d,x,y,z,color,choose){const mesh=new T.Mesh(new T.BoxGeometry(w,h,d),this.mat(color));mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);if(choose){mesh.userData.choose=choose;this.targets.push(mesh);}return mesh;};
 View.prototype.badge=function(parent,text,offset,fn){const el=this.button(this.ui,text,fn);el.className='hl-label';this.labels.push({parent,offset:new T.Vector3(...offset),el});};
 View.prototype.wire=function(parent,points,color){const c=new T.CatmullRomCurve3(points.map(p=>new T.Vector3(...p)));const m=new T.Mesh(new T.TubeGeometry(c,20,.007,5,false),this.mat(color,.1,.8));parent.add(m);return m;};
+View.prototype.environment=function(){
+ const room=new T.Group();room.name='data-center-room';this.root.add(room);
+ // Concrete floor, raised service strips and a deliberately open ceiling frame keep the
+ // equipment readable while establishing a real room scale around the four racks.
+ this.box(room,13.5,.08,12.5,0,-.08,0,0x252d33);
+ const aisle=new T.Mesh(new T.PlaneGeometry(8.6,1.35),new T.MeshStandardMaterial({color:0x303b40,metalness:.15,roughness:.9}));
+ aisle.rotation.x=-Math.PI/2;aisle.position.set(0,.005,.25);room.add(aisle);
+ [-3.9,3.9].forEach(x=>this.box(room,.08,3.05,12.1,x,1.48,0,0x303b42));
+ this.box(room,13.4,3.05,.08,0,1.48,-5.85,0x303b42);
+ [-4.9,4.9].forEach(x=>this.box(room,.12,3.25,12.3,x,1.62,0,0x1f292f));
+ // Keep the front side open so the camera can enter the room instead of looking
+ // through an opaque wall; the rear wall still establishes depth and scale.
+ this.box(room,13.4,3.25,.12,0,1.62,-5.85,0x1f292f);
+ // Ceiling cable trays and cool-white luminaires convey the overhead infrastructure.
+ [-2.7,2.7].forEach(x=>{this.box(room,.16,.12,11.6,x,3.15,0,0x4d5960);this.box(room,.045,.028,10.8,x,3.08,0,0x83b9b0);});
+ [-2.2,2.2].forEach(z=>{this.box(room,11.2,.1,.14,0,3.13,z,0x4d5960);});
+ [-1.15,1.15].forEach(x=>{const lamp=new T.Mesh(new T.BoxGeometry(.7,.025,2.5),new T.MeshBasicMaterial({color:0xcce9e4}));lamp.position.set(x,3.18,.1);room.add(lamp);});
+ // Safety-yellow floor markers provide a physical reference for the service aisle.
+ [-.72,.72].forEach(x=>this.box(room,.018,.006,11.5,x,.012,.05,0xb39a4a));
+};
 View.prototype.details=function(title,desc,tag='硬件结构 · 示意模型'){this.card.replaceChildren();this.card.hidden=false;this.button(this.card,'关闭',()=>this.closeDetails()).className='hl-close';const small=document.createElement('small');small.textContent=tag;const h=document.createElement('h2');h.textContent=title;const p=document.createElement('p');p.textContent=desc;this.card.append(small,h,p);};
 View.prototype.closeDetails = function () {
  this.card.hidden = true;
@@ -203,7 +223,7 @@ View.prototype.build=function(){
  if(this.root){this.scene.remove(this.root);const geom=new Set(),mat=new Set();this.root.traverse(o=>{if(o.geometry)geom.add(o.geometry);if(o.material)mat.add(o.material);});geom.forEach(g=>g.dispose());mat.forEach(m=>m.dispose());}
  this.labels.forEach(l=>l.el.remove());this.labels=[];this.items=[];this.targets=[];this.rdmaCables=[];this.cxlCables=[];this.rackLabels=new Map();this.selected=null;this.parts.replaceChildren();this.closeDetails();
  this.root=new T.Group();this.scene.add(this.root);
- this.box(this.root,14,.05,14,0,-.04,0,0x303a43);
+ this.environment();
  const grid=new T.GridHelper(14,28,0x505d65,0x424c55);grid.position.y=-.01;this.root.add(grid);
  this.visibleRacks().forEach((rack, index) => this.rack(rack, index));
  if (this.overview) {
